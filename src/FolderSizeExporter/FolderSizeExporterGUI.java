@@ -2,7 +2,6 @@ package FolderSizeExporter;
 
 import com.formdev.flatlaf.intellijthemes.materialthemeuilite.FlatMTArcDarkIJTheme;
 
-
 import javax.swing.*;
 import javax.swing.filechooser.FileSystemView;
 import java.awt.*;
@@ -19,9 +18,9 @@ public class FolderSizeExporterGUI {
 
     private static JTextArea textArea;
     private static JProgressBar progressBar;
-    private static JButton startButton;
-    private static JButton stopButton;
-    private static JFileChooser chooser;
+    private static JLabel statusLabel;
+    private static JButton startButton, stopButton;
+    private static JCheckBox includeFilesCheckBox;
     private static JComboBox<String> sortComboBox;
     private static File selectedFolder;
     private static ForkJoinPool pool;
@@ -45,9 +44,9 @@ public class FolderSizeExporterGUI {
     }
 
     private static void createAndShowGUI() {
-        JFrame frame = new JFrame("📁 폴더 용량 분석기");
+        JFrame frame = new JFrame("📁 폴더 용량 분석기 Ver 1.1");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(950, 700);
+        frame.setSize(950, 720);
         frame.setLocationRelativeTo(null);
 
         // 텍스트 영역
@@ -60,51 +59,56 @@ public class FolderSizeExporterGUI {
         // ProgressBar
         progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
-        progressBar.setPreferredSize(new Dimension(frame.getWidth(), 25));
 
-        // Buttons
+        statusLabel = new JLabel("준비됨");
+        statusLabel.setHorizontalAlignment(SwingConstants.LEFT);
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 10, 5, 0));
+
         JButton selectButton = new JButton("📂 폴더 선택");
         startButton = new JButton("🔍 분석 시작");
         stopButton = new JButton("⛔ 중단");
         startButton.setEnabled(false);
         stopButton.setEnabled(false);
 
+        includeFilesCheckBox = new JCheckBox("파일 단위 포함");
+        includeFilesCheckBox.setSelected(false);
+
         sortComboBox = new JComboBox<>(new String[]{"용량 (내림차순)", "이름 (오름차순)", "수정일 (최신순)"});
         sortComboBox.setFocusable(false);
 
         JLabel sortLabel = new JLabel("정렬 기준:");
-        sortLabel.setForeground(UIManager.getColor("Label.foreground"));
-
         JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10));
         controlPanel.add(selectButton);
         controlPanel.add(startButton);
         controlPanel.add(stopButton);
         controlPanel.add(sortLabel);
         controlPanel.add(sortComboBox);
+        controlPanel.add(includeFilesCheckBox);
 
         frame.add(controlPanel, BorderLayout.NORTH);
         frame.add(scrollPane, BorderLayout.CENTER);
-        frame.add(progressBar, BorderLayout.SOUTH);
 
-        chooser = new JFileChooser(FileSystemView.getFileSystemView().getHomeDirectory());
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.add(statusLabel, BorderLayout.NORTH);
+        bottomPanel.add(progressBar, BorderLayout.SOUTH);
+        frame.add(bottomPanel, BorderLayout.SOUTH);
+
+        JFileChooser chooser = new JFileChooser(FileSystemView.getFileSystemView().getHomeDirectory());
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
 
-        // 이벤트 등록
+        // 이벤트
         selectButton.addActionListener(e -> {
             int result = chooser.showOpenDialog(frame);
             if (result == JFileChooser.APPROVE_OPTION) {
                 selectedFolder = chooser.getSelectedFile();
-                textArea.setText("");
-                textArea.append("선택된 폴더: " + selectedFolder.getAbsolutePath() + "\n");
-
+                textArea.setText("선택된 폴더: " + selectedFolder.getAbsolutePath() + "\n");
                 progressBar.setValue(0);
-
                 processedFolders = 0;
                 totalFolders = 0;
                 stopRequested = false;
-
                 startButton.setEnabled(true);
                 stopButton.setEnabled(false);
+                statusLabel.setText("폴더 선택 완료");
             }
         });
 
@@ -123,6 +127,7 @@ public class FolderSizeExporterGUI {
                 progressBar.setValue(0);
                 startButton.setEnabled(true);
                 stopButton.setEnabled(false);
+                statusLabel.setText("분석 중단됨");
             });
         });
 
@@ -160,17 +165,14 @@ public class FolderSizeExporterGUI {
                 // CSV 파일 중복 방지
                 int counter = 1;
                 while (csvFile.exists()) {
-                    String newName = String.format("%s_folder_size_report(%d).csv",
-                            selectedFolder.getName(), counter++);
-                    csvFile = new File(downloadFolder, newName);
+                    csvFile = new File(downloadFolder, String.format("%s_folder_size_report(%d).csv", selectedFolder.getName(), counter++));
                 }
 
-                try (OutputStreamWriter osw = new OutputStreamWriter(new FileOutputStream(csvFile), StandardCharsets.UTF_8);
-                     BufferedWriter bw = new BufferedWriter(osw);
-                     PrintWriter writer = new PrintWriter(bw)) {
-
-                    writer.write('\uFEFF'); // BOM 추가
-                    writer.println("Depth,Folder Path,Size (bytes),Formatted Size,Last Modified");
+                try (PrintWriter writer = new PrintWriter(
+                        new BufferedWriter(new OutputStreamWriter(new FileOutputStream(csvFile), StandardCharsets.UTF_8))
+                )) {
+                    writer.write('\uFEFF');
+                    writer.println("Type,Depth,Path,Size (bytes),Formatted Size,Last Modified");
                     traverseAndWrite(selectedFolder, writer, 0, folderSizes);
                     SwingUtilities.invokeLater(() -> progressBar.setValue(100));
                 }
@@ -178,7 +180,6 @@ public class FolderSizeExporterGUI {
                 final File outputCsvFile = csvFile;
                 // 완료 메시지
                 SwingUtilities.invokeLater(() -> {
-
                     textArea.append("\n총 폴더 수: " + totalFolders + "개\n");
                     textArea.append("총 용량: " + formatSize(totalSize) + "\n");
                     textArea.append("CSV 파일 생성 완료: " + outputCsvFile.getAbsolutePath() + "\n");
@@ -186,19 +187,16 @@ public class FolderSizeExporterGUI {
                     progressBar.setValue(100);
                     startButton.setEnabled(true);
                     stopButton.setEnabled(false);
+                    statusLabel.setText("분석 완료 ✅");
 
-                    JOptionPane.showMessageDialog(
-                            null,
-                            "폴더 분석이 완료되었습니다!\n\n생성된 CSV 파일:\n" + outputCsvFile.getAbsolutePath(),
-                            "분석 완료",
-                            JOptionPane.INFORMATION_MESSAGE
-                    );
+                    JOptionPane.showMessageDialog(null,
+                            "폴더 분석이 완료되었습니다!\n\nCSV 파일:\n" + outputCsvFile.getAbsolutePath(),
+                            "분석 완료", JOptionPane.INFORMATION_MESSAGE);
                 });
 
             } catch (Exception ex) {
                 ex.printStackTrace();
-                SwingUtilities.invokeLater(() ->
-                        textArea.append("오류 발생: " + ex.getMessage() + "\n"));
+                SwingUtilities.invokeLater(() -> textArea.append("오류 발생: " + ex.getMessage() + "\n"));
             } finally {
                 startButton.setEnabled(true);
                 stopButton.setEnabled(false);
@@ -234,34 +232,44 @@ public class FolderSizeExporterGUI {
                 }
             }
 
-            for (FolderSizeTask t : subTasks) {
-                size += t.join();
-            }
-
+            for (FolderSizeTask t : subTasks) size += t.join();
             folderSizes.put(folder, size);
             return size;
         }
     }
 
-    /** 트리 + CSV 출력 */
+    /** 트리 + CSV 출력 (파일 포함 가능) */
     private static void traverseAndWrite(File folder, PrintWriter writer, int depth, Map<File, Long> folderSizes) {
         if (stopRequested) return;
 
         long size = folderSizes.getOrDefault(folder, 0L);
         String prefix = "│   ".repeat(Math.max(0, depth - 1)) + (depth == 0 ? "" : "└── ");
-        writer.printf("%d,\"%s\",%d,%s,%tF %<tT%n", depth, folder.getAbsolutePath(), size, formatSize(size), new Date(folder.lastModified()));
+        String line = String.format("%s%s [%s]%n", prefix, folder.getName(), formatSize(size));
 
-        try {
-            SwingUtilities.invokeLater(() -> {
-                if (stopRequested) return;
-                textArea.append(prefix + folder.getName() + " [" + formatSize(size) + "]\n");
-                textArea.setCaretPosition(textArea.getDocument().getLength());
+        writer.printf("Folder,%d,\"%s\",%d,%s,%tF %<tT%n", depth, folder.getAbsolutePath(), size, formatSize(size), new Date(folder.lastModified()));
+        SwingUtilities.invokeLater(() -> {
+            if (stopRequested) return;
+            textArea.append(line);
+            textArea.setCaretPosition(textArea.getDocument().getLength());
+            processedFolders++;
+            int percent = (int) ((processedFolders / (double) totalFolders) * 100);
+            progressBar.setValue(Math.min(percent, 99));
+            statusLabel.setText(String.format("진행 중: %d / %d 폴더", processedFolders, totalFolders));
+        });
 
-                processedFolders++;
-                int percent = (int) ((processedFolders / (double) totalFolders) * 100);
-                progressBar.setValue(Math.min(percent, 99));
-            });
-        } catch (Exception ignored) {}
+        // 파일 단위 출력
+        if (includeFilesCheckBox.isSelected()) {
+            File[] files = folder.listFiles(File::isFile);
+            if (files != null) {
+                Arrays.sort(files, Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+                for (File file : files) {
+                    String subPrefix = "│   ".repeat(depth) + "├── ";
+                    writer.printf("File,%d,\"%s\",%d,%s,%tF %<tT%n",
+                            depth + 1, file.getAbsolutePath(), file.length(), formatSize(file.length()), new Date(file.lastModified()));
+                    textArea.append(subPrefix + file.getName() + " [" + formatSize(file.length()) + "]\n");
+                }
+            }
+        }
 
         File[] subFolders = folder.listFiles(File::isDirectory);
         if (subFolders == null) return;
