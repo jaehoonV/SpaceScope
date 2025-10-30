@@ -1,5 +1,5 @@
 # 📁 SpaceScope
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+<a href="https://github.com/jaehoonV/SpaceScope/releases/latest"><img src="https://img.shields.io/badge/version-1.2.0-blue.svg"/></a>
 
 **SpaceScope**는 폴더 및 파일 용량을 시각적으로 분석하고,  
 트리 형태로 구조화된 결과를 CSV 파일로 내보내는 Java 기반 GUI 프로그램입니다.
