@@ -24,12 +24,20 @@ public class FolderSizeExporterGUI {
     private static JComboBox<String> sortComboBox;
     private static File selectedFolder;
     private static ForkJoinPool pool;
+    private static ResourceBundle bundle;
+    private static Locale locale;
 
     private static volatile boolean stopRequested = false;
     private static int totalFolders = 0;
     private static int processedFolders = 0;
 
+    private static final String APP_VERSION = "1.2.0";
+    private static final String APP_AUTHOR = "LEE JAEHOON";
+
     public static void main(String[] args) {
+        locale = LocaleManager.loadLocale();
+        bundle = ResourceBundle.getBundle("messages", locale, new UTF8Control());
+
         try {
             FlatMTArcDarkIJTheme.setup();
             UIManager.put("Component.arc", 10);
@@ -44,15 +52,53 @@ public class FolderSizeExporterGUI {
     }
 
     private static void createAndShowGUI() {
-        JFrame frame = new JFrame("📁 폴더 용량 분석기 Ver 1.1");
+        JFrame frame = new JFrame("📁 " + bundle.getString("app.title"));
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(950, 720);
         frame.setLocationRelativeTo(null);
 
+        // Settings
+        JMenuBar menuBar = new JMenuBar();
+        JMenu settingsMenu = new JMenu(bundle.getString("menu.settings"));
+
+        // language
+        JMenu languageMenu = new JMenu(bundle.getString("menu.settings.language"));
+        JMenuItem koreanItem = new JMenuItem(bundle.getString("menu.settings.language.korean"));
+        JMenuItem englishItem = new JMenuItem(bundle.getString("menu.settings.language.english"));
+
+        koreanItem.addActionListener(e -> switchLanguage(Locale.KOREAN, frame));
+        englishItem.addActionListener(e -> switchLanguage(Locale.ENGLISH, frame));
+
+        languageMenu.add(koreanItem);
+        languageMenu.add(englishItem);
+
+        // about
+        JMenuItem aboutItem = new JMenuItem(bundle.getString("menu.settings.about"));
+        aboutItem.addActionListener(e -> {
+            String message = String.format("""
+            📁 %s
+            Version %s
+            © 2025 %s
+            """, bundle.getString("app.title"), APP_VERSION, APP_AUTHOR);
+
+            JOptionPane.showMessageDialog(
+                    frame,
+                    message,
+                    bundle.getString("menu.settings.about"),
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+        });
+
+        settingsMenu.add(languageMenu);
+        settingsMenu.addSeparator();
+        settingsMenu.add(aboutItem);
+        menuBar.add(settingsMenu);
+        frame.setJMenuBar(menuBar);
+
         // 텍스트 영역
         textArea = new JTextArea();
         textArea.setEditable(false);
-        textArea.setFont(new Font("Malgun Gothic", Font.PLAIN, 13));
+        textArea.setFont(new Font("Noto Sans KR", Font.PLAIN, 13));
         JScrollPane scrollPane = new JScrollPane(textArea);
         scrollPane.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
@@ -60,23 +106,23 @@ public class FolderSizeExporterGUI {
         progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
 
-        statusLabel = new JLabel("준비됨");
+        statusLabel = new JLabel(bundle.getString("status.ready"));
         statusLabel.setHorizontalAlignment(SwingConstants.LEFT);
         statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 10, 5, 0));
 
-        JButton selectButton = new JButton("📂 폴더 선택");
-        startButton = new JButton("🔍 분석 시작");
-        stopButton = new JButton("⛔ 중단");
+        JButton selectButton = new JButton("📂 " + bundle.getString("button.select"));
+        startButton = new JButton("🔍 " + bundle.getString("button.start"));
+        stopButton = new JButton("⛔ " + bundle.getString("button.stop"));
         startButton.setEnabled(false);
         stopButton.setEnabled(false);
 
-        includeFilesCheckBox = new JCheckBox("파일 단위 포함");
+        includeFilesCheckBox = new JCheckBox(bundle.getString("checkbox.include_files"));
         includeFilesCheckBox.setSelected(false);
 
-        sortComboBox = new JComboBox<>(new String[]{"용량 (내림차순)", "이름 (오름차순)", "수정일 (최신순)"});
+        sortComboBox = new JComboBox<>(new String[]{bundle.getString("sort.size"), bundle.getString("sort.name"), bundle.getString("sort.date")});
         sortComboBox.setFocusable(false);
 
-        JLabel sortLabel = new JLabel("정렬 기준:");
+        JLabel sortLabel = new JLabel(bundle.getString("label.sort") + ":");
         JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10));
         controlPanel.add(selectButton);
         controlPanel.add(startButton);
@@ -101,14 +147,14 @@ public class FolderSizeExporterGUI {
             int result = chooser.showOpenDialog(frame);
             if (result == JFileChooser.APPROVE_OPTION) {
                 selectedFolder = chooser.getSelectedFile();
-                textArea.setText("선택된 폴더: " + selectedFolder.getAbsolutePath() + "\n");
+                textArea.setText(bundle.getString("status.folder_selected") + ": " + selectedFolder.getAbsolutePath() + "\n");
                 progressBar.setValue(0);
                 processedFolders = 0;
                 totalFolders = 0;
                 stopRequested = false;
                 startButton.setEnabled(true);
                 stopButton.setEnabled(false);
-                statusLabel.setText("폴더 선택 완료");
+                statusLabel.setText(bundle.getString("status.folder_select_done"));
             }
         });
 
@@ -123,22 +169,30 @@ public class FolderSizeExporterGUI {
             stopRequested = true;
             if (pool != null) pool.shutdownNow();
             SwingUtilities.invokeLater(() -> {
-                textArea.append("\n⛔ 분석이 중단되었습니다.\n");
+                textArea.append("\n" + bundle.getString("status.analysis_stop") + "\n");
                 progressBar.setValue(0);
                 startButton.setEnabled(true);
                 stopButton.setEnabled(false);
-                statusLabel.setText("분석 중단됨");
+                statusLabel.setText(bundle.getString("status.analysis_stopped"));
             });
         });
 
         frame.setVisible(true);
     }
 
+    private static void switchLanguage(Locale newLocale, JFrame frame) {
+        LocaleManager.saveLocale(newLocale);
+        frame.dispose();
+        locale = newLocale;
+        bundle = ResourceBundle.getBundle("messages", locale, new UTF8Control());
+        SwingUtilities.invokeLater(FolderSizeExporterGUI::createAndShowGUI);
+    }
+
     private static void analyzeFolder() {
         new Thread(() -> {
             try {
                 SwingUtilities.invokeLater(() -> {
-                    textArea.append("분석 시작...\n");
+                    textArea.append(bundle.getString("status.analysis_start") + "\n");
                     progressBar.setValue(0);
                 });
 
@@ -180,26 +234,28 @@ public class FolderSizeExporterGUI {
                 final File outputCsvFile = csvFile;
                 // 완료 메시지
                 SwingUtilities.invokeLater(() -> {
-                    textArea.append("\n총 폴더 수: " + totalFolders + "개\n");
-                    textArea.append("총 용량: " + formatSize(totalSize) + "\n");
-                    textArea.append("CSV 파일 생성 완료: " + outputCsvFile.getAbsolutePath() + "\n");
-                    textArea.append(String.format("분석 완료 (%.2f초)\n", (System.currentTimeMillis() - startTime) / 1000.0));
+                    textArea.append("\n" + bundle.getString("info.total_folders") + ": " + totalFolders + "\n");
+                    textArea.append(bundle.getString("info.total_size") + ": " + formatSize(totalSize) + "\n");
+                    textArea.append(bundle.getString("status.csv_done") + ": " + outputCsvFile.getAbsolutePath() + "\n");
+                    textArea.append(String.format(bundle.getString("status.analysis_done") + " (%.2f" + bundle.getString("info.seconds") + ")\n", (System.currentTimeMillis() - startTime) / 1000.0));
                     progressBar.setValue(100);
                     startButton.setEnabled(true);
                     stopButton.setEnabled(false);
-                    statusLabel.setText("분석 완료 ✅");
+                    statusLabel.setText(bundle.getString("status.analysis_done") + " ✅");
 
                     JOptionPane.showMessageDialog(null,
-                            "폴더 분석이 완료되었습니다!\n\nCSV 파일:\n" + outputCsvFile.getAbsolutePath(),
-                            "분석 완료", JOptionPane.INFORMATION_MESSAGE);
+                            bundle.getString("status.folder_analysis_complete") + "\n\n" + bundle.getString("info.csv_file") + ":\n" + outputCsvFile.getAbsolutePath(),
+                            bundle.getString("status.analysis_done"), JOptionPane.INFORMATION_MESSAGE);
                 });
 
             } catch (Exception ex) {
                 ex.printStackTrace();
-                SwingUtilities.invokeLater(() -> textArea.append("오류 발생: " + ex.getMessage() + "\n"));
+                SwingUtilities.invokeLater(() -> textArea.append(bundle.getString("status.error") + ": " + ex.getMessage() + "\n"));
             } finally {
-                startButton.setEnabled(true);
-                stopButton.setEnabled(false);
+                SwingUtilities.invokeLater(() -> {
+                    startButton.setEnabled(true);
+                    stopButton.setEnabled(false);
+                });
             }
         }).start();
     }
@@ -254,7 +310,7 @@ public class FolderSizeExporterGUI {
             processedFolders++;
             int percent = (int) ((processedFolders / (double) totalFolders) * 100);
             progressBar.setValue(Math.min(percent, 99));
-            statusLabel.setText(String.format("진행 중: %d / %d 폴더", processedFolders, totalFolders));
+            statusLabel.setText(String.format(bundle.getString("status.progress") + ": %d / %d " + bundle.getString("info.folder"), processedFolders, totalFolders));
         });
 
         // 파일 단위 출력
@@ -266,7 +322,13 @@ public class FolderSizeExporterGUI {
                     String subPrefix = "│   ".repeat(depth) + "├── ";
                     writer.printf("File,%d,\"%s\",%d,%s,%tF %<tT%n",
                             depth + 1, file.getAbsolutePath(), file.length(), formatSize(file.length()), new Date(file.lastModified()));
-                    textArea.append(subPrefix + file.getName() + " [" + formatSize(file.length()) + "]\n");
+
+                    final String lineForUI = subPrefix + file.getName() + " [" + formatSize(file.length()) + "]\n";
+                    SwingUtilities.invokeLater(() -> {
+                        if (!stopRequested) {
+                            textArea.append(lineForUI);
+                        }
+                    });
                 }
             }
         }
@@ -294,16 +356,11 @@ public class FolderSizeExporterGUI {
 
     /** 정렬 기준 선택 */
     private static Comparator<File> getComparator(Map<File, Long> folderSizes) {
-        String selected = (String) sortComboBox.getSelectedItem();
-        if (selected == null) return Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER);
-
-        return switch (selected) {
-            case "용량 (내림차순)" ->
-                    Comparator.<File, Long>comparing(folderSizes::get, Comparator.nullsLast(Long::compare)).reversed();
-            case "수정일 (최신순)" ->
-                    Comparator.comparingLong(File::lastModified).reversed();
-            default ->
-                    Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER);
+        int idx = sortComboBox.getSelectedIndex();
+        return switch (idx) {
+            case 0 -> Comparator.<File, Long>comparing(folderSizes::get, Comparator.nullsLast(Long::compare)).reversed(); // size
+            case 2 -> Comparator.comparingLong(File::lastModified).reversed(); // date (0: size, 1: name, 2: date 순서 유지)
+            default -> Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER); // name
         };
     }
 
