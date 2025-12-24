@@ -1,10 +1,11 @@
 # 📁 SpaceScope
-<a href="https://github.com/jaehoonV/SpaceScope/releases/latest"><img src="https://img.shields.io/badge/version-1.2.0-blue.svg"/></a>
+<a href="https://github.com/jaehoonV/SpaceScope/releases/latest"><img src="https://img.shields.io/badge/version-1.2.1-blue.svg"/></a>
 
 **SpaceScope**는 폴더 및 파일 용량을 시각적으로 분석하고,  
 트리 형태로 구조화된 결과를 CSV 파일로 내보내는 Java 기반 GUI 프로그램입니다.
 
-<img src="docs/Image/image1.png" alt="SpaceScope Screenshot" width="600"/>
+<p align="center"><img src="docs/Image/image1.png" alt="SpaceScope Screenshot" width="600"/></p>
+<p align="center"><img src="docs/Image/image2.png" alt="SpaceScope Screenshot" width="600"/></p>
 
 
 ---
@@ -39,7 +40,7 @@
 ---
 
 ## 🆕 최신 버전 다운로드
-[⬇️ Download SpaceScope v1.2.0](https://github.com/jaehoonV/SpaceScope/releases/latest)
+[⬇️ Download SpaceScope v1.2.1](https://github.com/jaehoonV/SpaceScope/releases/latest)
 
 > 항상 최신 안정 버전을 설치하세요.  
 > 이전 버전은 [GitHub Releases](https://github.com/jaehoonV/SpaceScope/releases) 페이지에서 확인 가능합니다.
@@ -68,12 +69,13 @@
 ---
 
 ## 🆙 버전별 변경 이력 (CHANGELOG)
-| 버전         | 날짜         | 주요 변경사항                                                                                                                                                         |
-| ---------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **v1.2.0** | 2025-10-30 | 🌐 **다국어 처리 (한국어 / 영어 지원)**<br>⚙️ **설정 메뉴 추가** – 언어 선택 및 정보 보기<br>🧵 **EDT 적용** – UI 변경 시 `SwingUtilities.invokeLater()` 적용 |
-| **v1.1.0** | 2025-10-28 | ⚡ **폴더 + 파일 단위 분석 기능 추가**<br>📊 **진행 상태 라벨 표시** (`진행 중: 123 / 456 폴더`)<br>💾 **CSV 구조 개선** (`Type` 열 추가)<br>🧭 **중단 버튼 개선** |
-| **v1.0.0** | 2025-10-22 | 🚀 첫 정식 릴리스<br>- 설치형 인스톨러 추가 (Inno Setup)<br>- JDK 없이 실행 가능한 독립 환경 구성<br>- CSV 내보내기 기능 개선 |
-| **v0.9.0** | 2025-10-20 | 🧩 초기 개발 버전<br>- 폴더 용량 분석 및 트리 구조 출력<br>- CSV 내보내기 기능 추가<br>- FlatLaf 다크 테마 적용 |
+| 버전         | 날짜         | 주요 변경사항                                                                                                                                           |
+|------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v1.2.1** | 2025-12-24 | 🌐 **설치 언어 자동 반영** - 설치 시 선택한 언어가 프로그램 기본 언어로 설정<br>🛠️ **언어 설정 안정화** – 사용자 설정(AppData)과 설치 기본값 분리 관리<br> |
+| **v1.2.0** | 2025-10-30 | 🌐 **다국어 처리 (한국어 / 영어 지원)**<br>⚙️ **설정 메뉴 추가** – 언어 선택 및 정보 보기<br>🧵 **EDT 적용** – UI 변경 시 `SwingUtilities.invokeLater()` 적용                       |
+| **v1.1.0** | 2025-10-28 | ⚡ **폴더 + 파일 단위 분석 기능 추가**<br>📊 **진행 상태 라벨 표시** (`진행 중: 123 / 456 폴더`)<br>💾 **CSV 구조 개선** (`Type` 열 추가)<br>🧭 **중단 버튼 개선**                       |
+| **v1.0.0** | 2025-10-22 | 🚀 첫 정식 릴리스<br>- 설치형 인스톨러 추가 (Inno Setup)<br>- JDK 없이 실행 가능한 독립 환경 구성<br>- CSV 내보내기 기능 개선                                                         |
+| **v0.9.0** | 2025-10-20 | 🧩 초기 개발 버전<br>- 폴더 용량 분석 및 트리 구조 출력<br>- CSV 내보내기 기능 추가<br>- FlatLaf 다크 테마 적용                                                                    |
 
 ---
 

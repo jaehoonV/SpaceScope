@@ -31,12 +31,12 @@ public class FolderSizeExporterGUI {
     private static int totalFolders = 0;
     private static int processedFolders = 0;
 
-    private static final String APP_VERSION = "1.2.0";
+    private static final String APP_VERSION = "1.2.1";
     private static final String APP_AUTHOR = "LEE JAEHOON";
 
     public static void main(String[] args) {
         locale = LocaleManager.loadLocale();
-        bundle = ResourceBundle.getBundle("messages", locale, new UTF8Control());
+        bundle = ResourceBundle.getBundle("resources.messages", locale, new UTF8Control());
 
         try {
             FlatMTArcDarkIJTheme.setup();
@@ -184,7 +184,7 @@ public class FolderSizeExporterGUI {
         LocaleManager.saveLocale(newLocale);
         frame.dispose();
         locale = newLocale;
-        bundle = ResourceBundle.getBundle("messages", locale, new UTF8Control());
+        bundle = ResourceBundle.getBundle("resources.messages", locale, new UTF8Control());
         SwingUtilities.invokeLater(FolderSizeExporterGUI::createAndShowGUI);
     }
 
