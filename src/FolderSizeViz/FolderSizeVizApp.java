@@ -9,8 +9,6 @@ import javax.swing.event.TreeWillExpandListener;
 import javax.swing.filechooser.FileSystemView;
 import javax.swing.tree.*;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
@@ -30,8 +28,6 @@ public class FolderSizeVizApp {
 
     private static final int TREE_MIN_W = 360;
     private static final double SPLIT_RESIZE_WEIGHT = 0.32;
-
-    private static final int CHART_LEFT_PADDING = 24;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
@@ -57,11 +53,22 @@ public class FolderSizeVizApp {
         private final JTree tree;
         private final DefaultTreeModel treeModel;
 
-        private final ChartPanel chartPanel = new ChartPanel();
+        // 탭1: 상세(바차트 스타일) - 별도 파일
+        private final DetailChartPanel detailPanel = new DetailChartPanel();
+
+        // 탭2: 파이차트(JFreeChart) - 별도 파일
+        private final PieChartTabPanel pieChartPanel = new PieChartTabPanel();
+
+        private final JTabbedPane rightTabs = new JTabbedPane();
+
         private final JLabel statusLabel = new JLabel("준비됨");
         private final JProgressBar progressBar = new JProgressBar();
 
         private SizeScanWorker currentWorker;
+
+        // 탭2 갱신용 캐시(스캔 결과 최신 상태 유지)
+        private final List<SizeItem> latestItems = new ArrayList<>();
+        private Path latestFolder = null;
 
         MainFrame() {
             super(APP_TITLE);
@@ -72,11 +79,83 @@ public class FolderSizeVizApp {
             FolderNode rootNode = createDrivesRootNode();
             treeModel = new DefaultTreeModel(rootNode);
 
-            tree = new JTree(treeModel);
-            tree.setRootVisible(false);
-            tree.setShowsRootHandles(true);
-            tree.setCellRenderer(new OsIconTreeCellRenderer());
+            tree = createTree(treeModel);
+            installTreeListeners();
 
+            JSplitPane splitPane = buildSplitPane();
+
+            setLayout(new BorderLayout());
+            add(splitPane, BorderLayout.CENTER);
+        }
+
+        // ---------------- UI 구성 ----------------
+
+        private JTree createTree(DefaultTreeModel model) {
+            JTree t = new JTree(model);
+            t.setRootVisible(false);
+            t.setShowsRootHandles(true);
+            t.setCellRenderer(new OsIconTreeCellRenderer());
+            return t;
+        }
+
+        private JSplitPane buildSplitPane() {
+            JScrollPane leftScroll = new JScrollPane(tree);
+            leftScroll.setMinimumSize(new Dimension(TREE_MIN_W, 0));
+            leftScroll.setBorder(BorderFactory.createEmptyBorder());
+            tree.setBorder(BorderFactory.createEmptyBorder());
+
+            JPanel right = new JPanel(new BorderLayout());
+            right.add(buildRightTabs(), BorderLayout.CENTER);
+            right.add(buildBottomBar(), BorderLayout.SOUTH);
+
+            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, right);
+            splitPane.setResizeWeight(SPLIT_RESIZE_WEIGHT);
+            return splitPane;
+        }
+
+        private JComponent buildRightTabs() {
+            JScrollPane detailScroll = new JScrollPane(detailPanel);
+            detailScroll.setBorder(BorderFactory.createEmptyBorder());
+
+            JPanel pieTab = new JPanel(new BorderLayout());
+            pieTab.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+            pieTab.add(pieChartPanel, BorderLayout.CENTER);
+
+            rightTabs.addTab("상세", detailScroll);
+            rightTabs.addTab("차트", pieTab);
+
+            rightTabs.addChangeListener(e -> {
+                // 탭2로 넘어갈 때 최신 결과로 갱신
+                if (rightTabs.getSelectedIndex() == 1) {
+                    refreshPieChartFromLatest();
+                }
+            });
+
+            return rightTabs;
+        }
+
+        private JPanel buildBottomBar() {
+            ThemeColors c = ThemeColors.fromUI();
+
+            JPanel bottom = new JPanel(new BorderLayout());
+            bottom.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, c.line));
+
+            JPanel content = new JPanel(new BorderLayout(10, 0));
+            content.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+
+            progressBar.setStringPainted(true);
+            progressBar.setVisible(false);
+
+            content.add(statusLabel, BorderLayout.CENTER);
+            content.add(progressBar, BorderLayout.EAST);
+
+            bottom.add(content, BorderLayout.CENTER);
+            return bottom;
+        }
+
+        // ---------------- 트리 로딩/리스너 ----------------
+
+        private void installTreeListeners() {
             tree.addTreeWillExpandListener(new TreeWillExpandListener() {
                 @Override
                 public void treeWillExpand(TreeExpansionEvent event) {
@@ -85,7 +164,7 @@ public class FolderSizeVizApp {
                         ensureChildrenLoaded(node);
                     }
                 }
-                @Override public void treeWillCollapse(TreeExpansionEvent event) {}
+                @Override public void treeWillCollapse(TreeExpansionEvent event) { /* no-op */ }
             });
 
             tree.addTreeSelectionListener(e -> {
@@ -96,24 +175,6 @@ public class FolderSizeVizApp {
                 if (node.isDirectory) startScan(node.path);
                 else showFileInfo(node.path);
             });
-
-            JScrollPane leftScroll = new JScrollPane(tree);
-            leftScroll.setMinimumSize(new Dimension(TREE_MIN_W, 0));
-            leftScroll.setBorder(BorderFactory.createEmptyBorder());
-            tree.setBorder(BorderFactory.createEmptyBorder());
-
-            JScrollPane chartScroll = new JScrollPane(chartPanel);
-            chartScroll.setBorder(BorderFactory.createEmptyBorder());
-
-            JPanel right = new JPanel(new BorderLayout());
-            right.add(chartScroll, BorderLayout.CENTER);
-            right.add(buildBottomBar(), BorderLayout.SOUTH);
-
-            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, right);
-            splitPane.setResizeWeight(SPLIT_RESIZE_WEIGHT);
-
-            setLayout(new BorderLayout());
-            add(splitPane, BorderLayout.CENTER);
         }
 
         private FolderNode createDrivesRootNode() {
@@ -134,25 +195,6 @@ public class FolderSizeVizApp {
                 }
             }
             return root;
-        }
-
-        private JPanel buildBottomBar() {
-            ThemeColors c = ThemeColors.fromUI();
-
-            JPanel bottom = new JPanel(new BorderLayout());
-            bottom.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, c.line));
-
-            JPanel content = new JPanel(new BorderLayout(10, 0));
-            content.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-
-            progressBar.setStringPainted(true);
-            progressBar.setVisible(false);
-
-            content.add(statusLabel, BorderLayout.CENTER);
-            content.add(progressBar, BorderLayout.EAST);
-
-            bottom.add(content, BorderLayout.CENTER);
-            return bottom;
         }
 
         private void ensureChildrenLoaded(FolderNode node) {
@@ -191,7 +233,6 @@ public class FolderSizeVizApp {
                 maybeAddLoadingPlaceholder(child, dir);
                 node.add(child);
             }
-
             for (Path f : files) {
                 node.add(new FolderNode(f));
             }
@@ -203,52 +244,83 @@ public class FolderSizeVizApp {
             }
         }
 
+        // ---------------- 동작: 파일 선택 / 폴더 스캔 ----------------
+
         private void showFileInfo(Path file) {
             cancelCurrentWorker();
             progressBar.setVisible(false);
 
             String name = fileNameOrPath(file);
-
             statusLabel.setText("파일 선택: " + file);
-            chartPanel.setTitle("파일: " + name);
-            chartPanel.setItems(Collections.emptyList());
+
+            // 탭1
+            detailPanel.setTitle("파일: " + name);
+            detailPanel.setItems(Collections.emptyList());
 
             Path openPath = file.getParent();
-            chartPanel.setTitleClickTarget(openPath);
-            chartPanel.setOnTitleClick(() -> openInExplorer(openPath));
+            detailPanel.setTitleClickTarget(openPath);
+            detailPanel.setOnTitleClick(() -> openInExplorer(openPath));
+
+            // 탭2(차트는 폴더 기준이므로 초기화)
+            clearLatest();
+            pieChartPanel.setTitle("선택 없음");
+            pieChartPanel.clear();
         }
 
         private void startScan(Path folder) {
             cancelCurrentWorker();
 
+            setLatestFolder(folder);
             statusLabel.setText("스캔 시작: " + folder);
+
             progressBar.setIndeterminate(true);
             progressBar.setString("스캔 중...");
             progressBar.setVisible(true);
 
-            chartPanel.setTitle("폴더: " + folder);
-            chartPanel.setItems(Collections.emptyList());
+            // 탭1 초기화
+            detailPanel.setTitle("폴더: " + folder);
+            detailPanel.setItems(Collections.emptyList());
+            detailPanel.setTitleClickTarget(folder);
+            detailPanel.setOnTitleClick(() -> openInExplorer(folder));
 
-            chartPanel.setTitleClickTarget(folder);
-            chartPanel.setOnTitleClick(() -> openInExplorer(folder));
+            // 탭2 초기화
+            pieChartPanel.setTitle("폴더: " + folder);
+            pieChartPanel.clear();
 
             currentWorker = new SizeScanWorker(folder, new SizeScanWorker.Callback() {
-                @Override public void onPartial(SizeItem item) {
-                    chartPanel.upsertItem(item);
+                @Override
+                public void onPartial(SizeItem item) {
+                    detailPanel.upsertItem(item);
+                    upsertLatest(item);
+
+                    // 차트 탭이 열려있을 때만 실시간 갱신
+                    if (rightTabs.getSelectedIndex() == 1) {
+                        pieChartPanel.setItemsTop10(latestItems);
+                    }
                 }
 
-                @Override public void onDone(List<SizeItem> finalItems, long totalBytes, long scannedFiles) {
+                @Override
+                public void onDone(List<SizeItem> finalItems, long totalBytes, long scannedFiles) {
                     progressBar.setVisible(false);
                     statusLabel.setText("완료: " + folder + " / 총 " + human(totalBytes) + " / 파일 " + scannedFiles + "개");
-                    chartPanel.setItems(finalItems);
+
+                    detailPanel.setItems(finalItems);
+
+                    latestItems.clear();
+                    latestItems.addAll(finalItems);
+
+                    // 완료 시에는 탭 상태와 상관없이 최신 데이터 반영
+                    refreshPieChartFromLatest();
                 }
 
-                @Override public void onCancelled() {
+                @Override
+                public void onCancelled() {
                     progressBar.setVisible(false);
                     statusLabel.setText("스캔 취소됨: " + folder);
                 }
 
-                @Override public void onError(Exception ex) {
+                @Override
+                public void onError(Exception ex) {
                     progressBar.setVisible(false);
                     statusLabel.setText("오류: " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
                 }
@@ -256,6 +328,36 @@ public class FolderSizeVizApp {
 
             currentWorker.execute();
         }
+
+        // ---------------- 최신 결과/차트 갱신 ----------------
+
+        private void refreshPieChartFromLatest() {
+            pieChartPanel.setTitle(latestFolder == null ? "선택 없음" : "폴더: " + latestFolder);
+            pieChartPanel.setItemsTop10(latestItems);
+        }
+
+        private void clearLatest() {
+            latestFolder = null;
+            latestItems.clear();
+        }
+
+        private void setLatestFolder(Path folder) {
+            latestFolder = folder;
+            latestItems.clear();
+        }
+
+        private void upsertLatest(SizeItem item) {
+            for (int i = 0; i < latestItems.size(); i++) {
+                SizeItem cur = latestItems.get(i);
+                if (cur.isDirectory == item.isDirectory && cur.name.equals(item.name)) {
+                    latestItems.set(i, item);
+                    return;
+                }
+            }
+            latestItems.add(item);
+        }
+
+        // ---------------- 기타 ----------------
 
         private void openInExplorer(Path path) {
             if (path == null) return;
@@ -291,6 +393,8 @@ public class FolderSizeVizApp {
             }
         }
     }
+
+    // ---------------- 트리 노드 / 렌더러 ----------------
 
     static class FolderNode extends DefaultMutableTreeNode {
         final Path path;
@@ -387,274 +491,26 @@ public class FolderSizeVizApp {
         }
     }
 
-    static class SizeItem {
-        final String name;
-        final long bytes;
-        final boolean isDirectory;
+    // ---------------- 데이터/테마 ----------------
 
-        SizeItem(String name, long bytes, boolean isDirectory) {
+    public static class SizeItem {
+        public final String name;
+        public final long bytes;
+        public final boolean isDirectory;
+
+        public SizeItem(String name, long bytes, boolean isDirectory) {
             this.name = name;
             this.bytes = bytes;
             this.isDirectory = isDirectory;
         }
     }
 
-    static class ChartPanel extends JPanel implements Scrollable {
-
-        private static final int PAD = 14;
-        private static final int TITLE_H = 30;
-
-        private static final int LABEL_H = 14;
-        private static final int GAP1 = 4;
-        private static final int BAR_H = 10;
-        private static final int GAP2 = 10;
-        private static final int ITEM_H = LABEL_H + GAP1 + BAR_H + GAP2;
-
-        private static final int AFTER_TITLE_GAP = 8;
-        private static final int AFTER_TITLE_LINE_OFFSET = 6;
-
-        private String title = "선택 없음";
-        private List<SizeItem> items = new ArrayList<>();
-
-        private Path titleClickTarget;
-        private Runnable onTitleClick;
-
-        private final Rectangle titleTextBounds = new Rectangle();
-        private boolean titleHover = false;
-
-        ChartPanel() {
-            setOpaque(true);
-            setBackground(UIManager.getColor("Panel.background"));
-            setForeground(UIManager.getColor("Label.foreground"));
-            setBorder(BorderFactory.createEmptyBorder(PAD, PAD, PAD, PAD));
-
-            addMouseListener(new MouseAdapter() {
-                @Override
-                public void mouseClicked(MouseEvent e) {
-                    if (!isTitleClickable()) return;
-                    if (titleTextBounds.contains(e.getPoint())) {
-                        onTitleClick.run();
-                    }
-                }
-
-                @Override
-                public void mouseExited(MouseEvent e) {
-                    titleHover = false;
-                    setCursor(Cursor.getDefaultCursor());
-                    setToolTipText(null);
-                }
-            });
-
-            addMouseMotionListener(new MouseAdapter() {
-                @Override
-                public void mouseMoved(MouseEvent e) {
-                    if (!isTitleClickable()) {
-                        if (titleHover) {
-                            titleHover = false;
-                            setCursor(Cursor.getDefaultCursor());
-                            setToolTipText(null);
-                            repaint();
-                        }
-                        return;
-                    }
-
-                    boolean hit = titleTextBounds.contains(e.getPoint());
-                    if (hit != titleHover) {
-                        titleHover = hit;
-                        repaint();
-                    }
-
-                    if (hit) {
-                        setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                        setToolTipText(buildTitleTooltip());
-                    } else {
-                        setCursor(Cursor.getDefaultCursor());
-                        setToolTipText(null);
-                    }
-                }
-            });
-
-            updatePreferredSize();
-        }
-
-        private boolean isTitleClickable() {
-            return titleClickTarget != null && onTitleClick != null;
-        }
-
-        private String buildTitleTooltip() {
-            if (titleClickTarget == null) return null;
-            return titleClickTarget.toString() + " 폴더로 이동";
-        }
-
-        void setTitle(String title) {
-            this.title = title;
-            updatePreferredSize();
-            repaint();
-        }
-
-        void setTitleClickTarget(Path path) {
-            this.titleClickTarget = path;
-            repaint();
-        }
-
-        void setOnTitleClick(Runnable r) {
-            this.onTitleClick = r;
-            repaint();
-        }
-
-        void setItems(List<SizeItem> newItems) {
-            items = sortedCopy(newItems);
-            updatePreferredSize();
-            repaint();
-        }
-
-        void upsertItem(SizeItem item) {
-            boolean replaced = false;
-
-            for (int i = 0; i < items.size(); i++) {
-                SizeItem cur = items.get(i);
-                if (cur.isDirectory == item.isDirectory && cur.name.equals(item.name)) {
-                    items.set(i, item);
-                    replaced = true;
-                    break;
-                }
-            }
-
-            if (!replaced) items.add(item);
-            items.sort((a, b) -> Long.compare(b.bytes, a.bytes));
-
-            updatePreferredSize();
-            repaint();
-        }
-
-        private static List<SizeItem> sortedCopy(List<SizeItem> src) {
-            List<SizeItem> sorted = new ArrayList<>(src);
-            sorted.sort((a, b) -> Long.compare(b.bytes, a.bytes));
-            return sorted;
-        }
-
-        private void updatePreferredSize() {
-            int header = TITLE_H + AFTER_TITLE_GAP;
-            int totalH = Math.max(200, header + (items.size() * ITEM_H));
-            setPreferredSize(new Dimension(10, totalH));
-            revalidate();
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            super.paintComponent(g);
-            Graphics2D g2 = (Graphics2D) g.create();
-            try {
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-                ThemeColors c = ThemeColors.fromUI();
-
-                int w = getWidth();
-                int y = 0;
-
-                Font titleFont = getFont().deriveFont(Font.BOLD, 15f);
-                g2.setFont(titleFont);
-
-                FontMetrics fm = g2.getFontMetrics();
-                int baselineY = y + 18;
-
-                String titleText = title;
-
-                int textW = fm.stringWidth(titleText);
-                int textH = fm.getHeight();
-                int textTop = baselineY - fm.getAscent();
-
-                titleTextBounds.setBounds(0, textTop, textW, textH);
-
-                g2.setColor(c.fg);
-                g2.drawString(titleText, 0, baselineY);
-
-                if (isTitleClickable() && titleHover) {
-                    g2.setColor(c.muted);
-                    int underlineY = baselineY + 2;
-                    g2.drawLine(0, underlineY, Math.max(0, textW), underlineY);
-                }
-
-                y += TITLE_H;
-
-                g2.setColor(c.line);
-                g2.drawLine(0, y - AFTER_TITLE_LINE_OFFSET, w, y - AFTER_TITLE_LINE_OFFSET);
-                y += AFTER_TITLE_GAP;
-
-                int chartTop = y;
-
-                if (items.isEmpty()) {
-                    g2.setColor(c.muted);
-                    g2.drawString("폴더를 선택하면 하위 폴더/파일 용량을 함께 표시합니다. 파일을 선택하면 파일 크기만 표시합니다.", 0, chartTop + 30);
-                    return;
-                }
-
-                long max = items.stream().mapToLong(it -> it.bytes).max().orElse(1L);
-                int barX = CHART_LEFT_PADDING;
-                int barAreaWidth = w - CHART_LEFT_PADDING - 10;
-                int tagX = CHART_LEFT_PADDING - 10;
-
-                int yy = chartTop;
-
-                for (SizeItem it : items) {
-                    double ratio = (max == 0) ? 0.0 : (double) it.bytes / (double) max;
-                    int barW = (int) (barAreaWidth * ratio);
-
-                    g2.setColor(c.fg);
-                    String tag = it.isDirectory ? "[DIR] " : "[FILE] ";
-                    String label = tag + trimMiddle(it.name, 42) + "  (" + human(it.bytes) + ")";
-                    g2.drawString(label, tagX, yy + 12);
-
-                    int barY = yy + LABEL_H + GAP1;
-                    g2.setColor(it.isDirectory ? c.dirBar : c.fileBar);
-                    g2.fillRoundRect(barX, barY, Math.max(2, barW), BAR_H, 10, 10);
-
-                    yy += ITEM_H;
-                }
-            } finally {
-                g2.dispose();
-            }
-        }
-
-        private static String trimMiddle(String s, int maxLen) {
-            if (s == null) return "";
-            if (s.length() <= maxLen) return s;
-            int keep = Math.max(4, (maxLen - 3) / 2);
-            return s.substring(0, keep) + "..." + s.substring(s.length() - keep);
-        }
-
-        @Override
-        public Dimension getPreferredScrollableViewportSize() {
-            return getPreferredSize();
-        }
-
-        @Override
-        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
-            return ITEM_H;
-        }
-
-        @Override
-        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
-            return ITEM_H * 6;
-        }
-
-        @Override
-        public boolean getScrollableTracksViewportWidth() {
-            return true;
-        }
-
-        @Override
-        public boolean getScrollableTracksViewportHeight() {
-            return false;
-        }
-    }
-
-    static class ThemeColors {
-        final Color fg;
-        final Color muted;
-        final Color line;
-        final Color dirBar;
-        final Color fileBar;
+    public static class ThemeColors {
+        public final Color fg;
+        public final Color muted;
+        public final Color line;
+        public final Color dirBar;
+        public final Color fileBar;
 
         private ThemeColors(Color fg, Color muted, Color line, Color dirBar, Color fileBar) {
             this.fg = fg;
@@ -664,7 +520,7 @@ public class FolderSizeVizApp {
             this.fileBar = fileBar;
         }
 
-        static ThemeColors fromUI() {
+        public static ThemeColors fromUI() {
             Color fg = UIManager.getColor("Label.foreground");
             Color muted = UIManager.getColor("Label.disabledForeground");
             if (muted == null && fg != null) muted = fg.darker();
@@ -682,6 +538,8 @@ public class FolderSizeVizApp {
             return new ThemeColors(fg, muted, line, dirBar, fileBar);
         }
     }
+
+    // ---------------- 스캔 워커 ----------------
 
     static class SizeScanWorker extends SwingWorker<List<SizeItem>, SizeItem> {
 
@@ -816,7 +674,9 @@ public class FolderSizeVizApp {
         }
     }
 
-    private static String human(long bytes) {
+    // ---------------- 유틸 ----------------
+
+    public static String human(long bytes) {
         if (bytes < 1024) return bytes + " B";
         double b = bytes;
         String[] u = {"KB", "MB", "GB", "TB"};
