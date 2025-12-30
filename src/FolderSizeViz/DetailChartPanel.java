@@ -1,12 +1,15 @@
 package FolderSizeViz;
 
+import Utils.LanguageUtil;
+import Utils.LocaleManager;
+import Utils.UTF8Control;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.*;
 import java.util.List;
 
 public class DetailChartPanel extends JPanel implements Scrollable {
@@ -25,14 +28,10 @@ public class DetailChartPanel extends JPanel implements Scrollable {
 
     private static final int CHART_LEFT_PADDING = 24;
 
-    private static final String DEFAULT_TITLE = "선택 없음";
-    private static final String EMPTY_HINT =
-            "폴더를 선택하면 하위 폴더/파일 용량을 함께 표시합니다. 파일을 선택하면 파일 크기만 표시합니다.";
-
     private static final Comparator<FolderSizeVizApp.SizeItem> BY_SIZE_DESC =
             (a, b) -> Long.compare(b.bytes, a.bytes);
-
-    private String title = DEFAULT_TITLE;
+    
+    private String title;
     private final List<FolderSizeVizApp.SizeItem> items = new ArrayList<>();
 
     private Path titleClickTarget;
@@ -47,12 +46,16 @@ public class DetailChartPanel extends JPanel implements Scrollable {
         setForeground(UIManager.getColor("Label.foreground"));
         setBorder(BorderFactory.createEmptyBorder(PAD, PAD, PAD, PAD));
 
+        LanguageUtil.init();
+        
+        this.title = LanguageUtil.ln("label.none_selected");
+
         installTitleMouseHandlers();
         updatePreferredSize();
     }
 
     public void setTitle(String title) {
-        this.title = (title == null || title.isBlank()) ? DEFAULT_TITLE : title;
+        this.title = (title == null || title.isBlank()) ? LanguageUtil.ln("label.none_selected") : title;
         updatePreferredSize();
         repaint();
     }
@@ -149,7 +152,7 @@ public class DetailChartPanel extends JPanel implements Scrollable {
     }
 
     private String buildTitleTooltip() {
-        return (titleClickTarget == null) ? null : titleClickTarget + " 폴더로 이동";
+        return (titleClickTarget == null) ? null : LanguageUtil.fmt("tooltip.go_to_folder", titleClickTarget.toString());
     }
 
     private void updatePreferredSize() {
@@ -200,7 +203,7 @@ public class DetailChartPanel extends JPanel implements Scrollable {
 
             if (items.isEmpty()) {
                 g2.setColor(c.muted);
-                g2.drawString(EMPTY_HINT, 0, y + 30);
+                g2.drawString(LanguageUtil.ln("hint.detail_empty"), 0, y + 30);
                 return;
             }
 

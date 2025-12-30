@@ -1,5 +1,7 @@
 package FolderSizeViz;
 
+import Utils.LanguageUtil;
+import Utils.LocaleManager;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.intellijthemes.materialthemeuilite.FlatMTArcDarkIJTheme;
 
@@ -22,7 +24,9 @@ import java.util.concurrent.CancellationException;
 
 public class FolderSizeVizApp {
 
-    private static final String APP_TITLE = "Folder Size Visualizer";
+    private static final String APP_VERSION = "2.0.0";
+    private static final String APP_AUTHOR = "LEE JAEHOON";
+
     private static final String LOADING_NODE_TEXT = "loading...";
 
     private static final int FRAME_W = 1300;
@@ -40,6 +44,8 @@ public class FolderSizeVizApp {
     });
 
     public static void main(String[] args) {
+        LanguageUtil.init();
+        
         SwingUtilities.invokeLater(() -> {
             setupDarkTheme();
             new MainFrame().setVisible(true);
@@ -68,7 +74,7 @@ public class FolderSizeVizApp {
 
         private final JTabbedPane rightTabs = new JTabbedPane();
 
-        private final JLabel statusLabel = new JLabel("준비됨");
+        private final JLabel statusLabel = new JLabel(LanguageUtil.ln("status.ready"));
         private final JProgressBar progressBar = new JProgressBar();
 
         private SizeScanWorker currentWorker;
@@ -77,10 +83,12 @@ public class FolderSizeVizApp {
         private Path latestFolder;
 
         MainFrame() {
-            super(APP_TITLE);
+            super("📁 " + LanguageUtil.ln("app.title"));
             setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             setSize(FRAME_W, FRAME_H);
             setLocationRelativeTo(null);
+
+            setJMenuBar(buildMenuBar());
 
             FolderNode rootNode = createDrivesRootNode();
             treeModel = new DefaultTreeModel(rootNode);
@@ -90,6 +98,58 @@ public class FolderSizeVizApp {
 
             setLayout(new BorderLayout());
             add(buildSplitPane(), BorderLayout.CENTER);
+        }
+
+        private JMenuBar buildMenuBar() {
+            JMenuBar menuBar = new JMenuBar();
+
+            JMenu settingsMenu = new JMenu(LanguageUtil.ln("menu.settings"));
+
+            JMenu languageMenu = new JMenu(LanguageUtil.ln("menu.settings.language"));
+            JMenuItem koreanItem = new JMenuItem(LanguageUtil.ln("menu.settings.language.korean"));
+            JMenuItem englishItem = new JMenuItem(LanguageUtil.ln("menu.settings.language.english"));
+
+            koreanItem.addActionListener(e -> switchLanguage(Locale.KOREAN));
+            englishItem.addActionListener(e -> switchLanguage(Locale.ENGLISH));
+
+            languageMenu.add(koreanItem);
+            languageMenu.add(englishItem);
+
+            JMenuItem aboutItem = new JMenuItem(LanguageUtil.ln("menu.settings.about"));
+            aboutItem.addActionListener(e -> showAbout());
+
+            settingsMenu.add(languageMenu);
+            settingsMenu.addSeparator();
+            settingsMenu.add(aboutItem);
+
+            menuBar.add(settingsMenu);
+            return menuBar;
+        }
+
+        private void switchLanguage(Locale newLocale) {
+            LocaleManager.saveLocale(newLocale);
+            dispose();
+            LanguageUtil.setLocale(newLocale);
+
+            SwingUtilities.invokeLater(() -> {
+                setupDarkTheme();
+                new MainFrame().setVisible(true);
+            });
+        }
+
+        private void showAbout() {
+            String message = String.format("""
+            📁 %s
+            Version %s
+            © 2025 %s
+            """, LanguageUtil.ln("app.title"), APP_VERSION, APP_AUTHOR);
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    message,
+                    LanguageUtil.ln("menu.settings.about"),
+                    JOptionPane.INFORMATION_MESSAGE
+            );
         }
 
         private JTree createTree(DefaultTreeModel model) {
@@ -124,8 +184,8 @@ public class FolderSizeVizApp {
             pieScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
             pieScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
 
-            rightTabs.addTab("상세", detailScroll);
-            rightTabs.addTab("차트", pieScroll);
+            rightTabs.addTab(LanguageUtil.ln("tab.detail"), detailScroll);
+            rightTabs.addTab(LanguageUtil.ln("tab.chart"), pieScroll);
 
             rightTabs.addChangeListener(e -> {
                 if (rightTabs.getSelectedIndex() == 1) refreshPieChartFromLatest();
@@ -176,7 +236,7 @@ public class FolderSizeVizApp {
         }
 
         private FolderNode createDrivesRootNode() {
-            FolderNode root = FolderNode.createVirtualRoot("내 PC");
+            FolderNode root = FolderNode.createVirtualRoot(LanguageUtil.ln("tree.root"));
 
             File[] roots = File.listRoots();
             if (roots == null || roots.length == 0) return root;
@@ -238,22 +298,6 @@ public class FolderSizeVizApp {
             }
         }
 
-        /*private void showFileInfo(Path file) {
-            cancelCurrentWorker();
-            progressBar.setVisible(false);
-
-            String name = fileNameOrPath(file);
-            statusLabel.setText("파일 선택: " + file);
-
-            Path openPath = file.getParent();
-
-            applySelectionToDetail("파일: " + name, openPath);
-            applySelectionToPie("파일: " + name, openPath);
-
-            latestFolder = null;
-            latestItems.clear();
-        }*/
-
         private void showFileInfo(Path file) {
             cancelCurrentWorker();
             ++scanToken;
@@ -261,7 +305,7 @@ public class FolderSizeVizApp {
             progressBar.setVisible(false);
 
             String name = fileNameOrPath(file);
-            statusLabel.setText("파일 선택: " + file);
+            statusLabel.setText( LanguageUtil.ln("status.file_selected") + " : " + file);
 
             long size = 0L;
             try {
@@ -271,22 +315,17 @@ public class FolderSizeVizApp {
             SizeItem single = new SizeItem(name, size, false);
             List<SizeItem> singleList = List.of(single);
 
-            // 탭1(상세) - 파일도 1개짜리 막대로 표시
-            detailPanel.setTitle("파일: " + name);
+            detailPanel.setTitle(LanguageUtil.ln("label.file") + " : " + name);
             detailPanel.setItems(singleList);
 
-            Path openPath = file.getParent(); // 폴더로 이동
+            Path openPath = file.getParent();
             detailPanel.setTitleClickTarget(openPath);
             detailPanel.setOnTitleClick(() -> openInExplorer(openPath));
 
-            // 탭2(차트) - 파일 1개 조각으로 표시
-            pieChartPanel.setTitle("파일: " + name);
+            pieChartPanel.setTitle(LanguageUtil.ln("label.file") + " : " + name);
             pieChartPanel.setTitleClickTarget(openPath);
             pieChartPanel.setOnTitleClick(() -> openInExplorer(openPath));
             pieChartPanel.setItemsTop10(singleList);
-
-            // 최신 캐시는 파일 선택 시 의미 없으니 비우기(선택 사항)
-            //clearLatest();
         }
 
         private void startScan(Path folder) {
@@ -297,14 +336,14 @@ public class FolderSizeVizApp {
             latestFolder = folder;
             latestItems.clear();
 
-            statusLabel.setText("스캔 시작: " + folder);
+            statusLabel.setText(LanguageUtil.ln("status.scan_start") + " : " + folder);
 
             progressBar.setIndeterminate(true);
-            progressBar.setString("스캔 중...");
+            progressBar.setString(LanguageUtil.ln("status.scanning"));
             progressBar.setVisible(true);
 
-            applySelectionToDetail("폴더: " + folder, folder);
-            applySelectionToPie("폴더: " + folder, folder);
+            applySelectionToDetail(LanguageUtil.ln("info.folder") + " : " + folder, folder);
+            applySelectionToPie(LanguageUtil.ln("info.folder") + " : " + folder, folder);
             pieChartPanel.clear();
 
             currentWorker = new SizeScanWorker(folder, new SizeScanWorker.Callback() {
@@ -323,7 +362,7 @@ public class FolderSizeVizApp {
                 public void onDone(List<SizeItem> finalItems, long totalBytes, long scannedFiles) {
                     if (myToken != scanToken) return;
                     progressBar.setVisible(false);
-                    statusLabel.setText("완료: " + folder + " / 총 " + human(totalBytes) + " / 파일 " + scannedFiles + "개");
+                    statusLabel.setText(LanguageUtil.ln("status.done") + " : " + folder + " / " + LanguageUtil.ln("info.total_size") + " : " + human(totalBytes) + " / " + LanguageUtil.ln("label.file") + " : " + scannedFiles);
 
                     detailPanel.setItems(finalItems);
 
@@ -337,14 +376,14 @@ public class FolderSizeVizApp {
                 public void onCancelled() {
                     if (myToken != scanToken) return;
                     progressBar.setVisible(false);
-                    statusLabel.setText("스캔 취소됨: " + folder);
+                    statusLabel.setText(LanguageUtil.ln("status.scan_cancelled") + " : " + folder);
                 }
 
                 @Override
                 public void onError(Exception ex) {
                     if (myToken != scanToken) return;
                     progressBar.setVisible(false);
-                    statusLabel.setText("오류: " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
+                    statusLabel.setText(LanguageUtil.ln("status.error") + " : " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
                 }
             });
 
@@ -366,14 +405,14 @@ public class FolderSizeVizApp {
 
         private void refreshPieChartFromLatest() {
             if (latestFolder == null) {
-                pieChartPanel.setTitle("선택 없음");
+                pieChartPanel.setTitle(LanguageUtil.ln("label.none_selected"));
                 pieChartPanel.setTitleClickTarget(null);
                 pieChartPanel.setOnTitleClick(null);
                 pieChartPanel.clear();
                 return;
             }
 
-            pieChartPanel.setTitle("폴더: " + latestFolder);
+            pieChartPanel.setTitle(LanguageUtil.ln("info.folder") + " : " + latestFolder);
             pieChartPanel.setTitleClickTarget(latestFolder);
             pieChartPanel.setOnTitleClick(() -> openInExplorer(latestFolder));
             pieChartPanel.setItemsTop10(latestItems);
@@ -403,7 +442,7 @@ public class FolderSizeVizApp {
             try {
                 new ProcessBuilder("explorer.exe", path.toAbsolutePath().toString()).start();
             } catch (Exception ex) {
-                statusLabel.setText("탐색기 열기 실패: " + path);
+                statusLabel.setText(LanguageUtil.ln("error.explorer_open_failed") + " : " + path);
             }
         }
 

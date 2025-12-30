@@ -1,5 +1,6 @@
 package FolderSizeExporter;
 
+import Utils.LocaleManager;
 import Utils.UTF8Control;
 import com.formdev.flatlaf.intellijthemes.materialthemeuilite.FlatMTArcDarkIJTheme;
 

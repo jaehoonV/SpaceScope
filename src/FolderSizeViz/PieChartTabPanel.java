@@ -1,5 +1,8 @@
 package FolderSizeViz;
 
+import Utils.LanguageUtil;
+import Utils.LocaleManager;
+import Utils.UTF8Control;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartMouseEvent;
 import org.jfree.chart.ChartMouseListener;
@@ -18,9 +21,8 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
 import java.text.AttributedString;
-import java.util.Comparator;
+import java.util.*;
 import java.util.List;
-import java.util.Objects;
 
 public class PieChartTabPanel extends JPanel implements Scrollable {
 
@@ -28,7 +30,10 @@ public class PieChartTabPanel extends JPanel implements Scrollable {
     private static final Comparator<FolderSizeVizApp.SizeItem> BY_SIZE_DESC =
             (a, b) -> Long.compare(b.bytes, a.bytes);
 
-    private String title = DEFAULT_TITLE;
+    private ResourceBundle bundle;
+    private static Locale locale;
+
+    private String title;
     private Path titleClickTarget;
     private Runnable onTitleClick;
 
@@ -43,6 +48,10 @@ public class PieChartTabPanel extends JPanel implements Scrollable {
 
     public PieChartTabPanel() {
         super(new BorderLayout());
+
+        LanguageUtil.init();
+        this.title = LanguageUtil.ln("label.none_selected");
+
         setOpaque(true);
         setBackground(UIManager.getColor("Panel.background"));
 
@@ -134,7 +143,7 @@ public class PieChartTabPanel extends JPanel implements Scrollable {
     }
 
     private String buildTitleTooltip() {
-        return (titleClickTarget == null) ? null : titleClickTarget + " 폴더로 이동";
+        return (titleClickTarget == null) ? null : LanguageUtil.fmt("tooltip.go_to_folder", titleClickTarget.toString());
     }
 
     private class HeaderPanel extends JPanel {

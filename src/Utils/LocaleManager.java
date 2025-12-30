@@ -1,4 +1,4 @@
-package FolderSizeExporter;
+package Utils;
 
 import java.io.*;
 import java.util.Locale;
