@@ -7,7 +7,9 @@ import javax.swing.*;
 import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.filechooser.FileSystemView;
-import javax.swing.tree.*;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellRenderer;
+import javax.swing.tree.DefaultTreeModel;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
@@ -23,11 +25,19 @@ public class FolderSizeVizApp {
     private static final String APP_TITLE = "Folder Size Visualizer";
     private static final String LOADING_NODE_TEXT = "loading...";
 
-    private static final int FRAME_W = 1200;
-    private static final int FRAME_H = 760;
+    private static final int FRAME_W = 1300;
+    private static final int FRAME_H = 700;
 
     private static final int TREE_MIN_W = 360;
     private static final double SPLIT_RESIZE_WEIGHT = 0.32;
+
+    private static long scanToken = 0;
+
+    private static final Comparator<Path> PATH_BY_NAME = Comparator.comparing(p -> {
+        Path fn = p.getFileName();
+        String s = (fn == null ? p.toString() : fn.toString());
+        return s.toLowerCase(Locale.ROOT);
+    });
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
@@ -53,10 +63,7 @@ public class FolderSizeVizApp {
         private final JTree tree;
         private final DefaultTreeModel treeModel;
 
-        // 탭1: 상세(바차트 스타일) - 별도 파일
         private final DetailChartPanel detailPanel = new DetailChartPanel();
-
-        // 탭2: 파이차트(JFreeChart) - 별도 파일
         private final PieChartTabPanel pieChartPanel = new PieChartTabPanel();
 
         private final JTabbedPane rightTabs = new JTabbedPane();
@@ -66,9 +73,8 @@ public class FolderSizeVizApp {
 
         private SizeScanWorker currentWorker;
 
-        // 탭2 갱신용 캐시(스캔 결과 최신 상태 유지)
         private final List<SizeItem> latestItems = new ArrayList<>();
-        private Path latestFolder = null;
+        private Path latestFolder;
 
         MainFrame() {
             super(APP_TITLE);
@@ -82,13 +88,9 @@ public class FolderSizeVizApp {
             tree = createTree(treeModel);
             installTreeListeners();
 
-            JSplitPane splitPane = buildSplitPane();
-
             setLayout(new BorderLayout());
-            add(splitPane, BorderLayout.CENTER);
+            add(buildSplitPane(), BorderLayout.CENTER);
         }
-
-        // ---------------- UI 구성 ----------------
 
         private JTree createTree(DefaultTreeModel model) {
             JTree t = new JTree(model);
@@ -117,18 +119,16 @@ public class FolderSizeVizApp {
             JScrollPane detailScroll = new JScrollPane(detailPanel);
             detailScroll.setBorder(BorderFactory.createEmptyBorder());
 
-            JPanel pieTab = new JPanel(new BorderLayout());
-            pieTab.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-            pieTab.add(pieChartPanel, BorderLayout.CENTER);
+            JScrollPane pieScroll = new JScrollPane(pieChartPanel);
+            pieScroll.setBorder(BorderFactory.createEmptyBorder());
+            pieScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+            pieScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
 
             rightTabs.addTab("상세", detailScroll);
-            rightTabs.addTab("차트", pieTab);
+            rightTabs.addTab("차트", pieScroll);
 
             rightTabs.addChangeListener(e -> {
-                // 탭2로 넘어갈 때 최신 결과로 갱신
-                if (rightTabs.getSelectedIndex() == 1) {
-                    refreshPieChartFromLatest();
-                }
+                if (rightTabs.getSelectedIndex() == 1) refreshPieChartFromLatest();
             });
 
             return rightTabs;
@@ -153,18 +153,16 @@ public class FolderSizeVizApp {
             return bottom;
         }
 
-        // ---------------- 트리 로딩/리스너 ----------------
-
         private void installTreeListeners() {
             tree.addTreeWillExpandListener(new TreeWillExpandListener() {
                 @Override
                 public void treeWillExpand(TreeExpansionEvent event) {
                     Object last = event.getPath().getLastPathComponent();
-                    if (last instanceof FolderNode node) {
-                        ensureChildrenLoaded(node);
-                    }
+                    if (last instanceof FolderNode node) ensureChildrenLoaded(node);
                 }
-                @Override public void treeWillCollapse(TreeExpansionEvent event) { /* no-op */ }
+
+                @Override
+                public void treeWillCollapse(TreeExpansionEvent event) {}
             });
 
             tree.addTreeSelectionListener(e -> {
@@ -191,16 +189,13 @@ public class FolderSizeVizApp {
                     FolderNode drive = new FolderNode(p);
                     maybeAddLoadingPlaceholder(drive, p);
                     root.add(drive);
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             }
             return root;
         }
 
         private void ensureChildrenLoaded(FolderNode node) {
-            if (!node.isDirectory) return;
-            if (node.isVirtual()) return;
-            if (node.childrenLoaded) return;
+            if (!node.isDirectory || node.isVirtual() || node.childrenLoaded) return;
 
             loadChildrenOneLevel(node);
             treeModel.reload(node);
@@ -218,8 +213,7 @@ public class FolderSizeVizApp {
                     try {
                         if (Files.isDirectory(p)) dirs.add(p);
                         else files.add(p);
-                    } catch (Exception ignored) {
-                    }
+                    } catch (Exception ignored) {}
                 }
             } catch (IOException | SecurityException ignored) {
                 return;
@@ -244,56 +238,82 @@ public class FolderSizeVizApp {
             }
         }
 
-        // ---------------- 동작: 파일 선택 / 폴더 스캔 ----------------
-
-        private void showFileInfo(Path file) {
+        /*private void showFileInfo(Path file) {
             cancelCurrentWorker();
             progressBar.setVisible(false);
 
             String name = fileNameOrPath(file);
             statusLabel.setText("파일 선택: " + file);
 
-            // 탭1
-            detailPanel.setTitle("파일: " + name);
-            detailPanel.setItems(Collections.emptyList());
-
             Path openPath = file.getParent();
+
+            applySelectionToDetail("파일: " + name, openPath);
+            applySelectionToPie("파일: " + name, openPath);
+
+            latestFolder = null;
+            latestItems.clear();
+        }*/
+
+        private void showFileInfo(Path file) {
+            cancelCurrentWorker();
+            ++scanToken;
+
+            progressBar.setVisible(false);
+
+            String name = fileNameOrPath(file);
+            statusLabel.setText("파일 선택: " + file);
+
+            long size = 0L;
+            try {
+                if (Files.isRegularFile(file)) size = Files.size(file);
+            } catch (Exception ignored) {}
+
+            SizeItem single = new SizeItem(name, size, false);
+            List<SizeItem> singleList = List.of(single);
+
+            // 탭1(상세) - 파일도 1개짜리 막대로 표시
+            detailPanel.setTitle("파일: " + name);
+            detailPanel.setItems(singleList);
+
+            Path openPath = file.getParent(); // 폴더로 이동
             detailPanel.setTitleClickTarget(openPath);
             detailPanel.setOnTitleClick(() -> openInExplorer(openPath));
 
-            // 탭2(차트는 폴더 기준이므로 초기화)
-            clearLatest();
-            pieChartPanel.setTitle("선택 없음");
-            pieChartPanel.clear();
+            // 탭2(차트) - 파일 1개 조각으로 표시
+            pieChartPanel.setTitle("파일: " + name);
+            pieChartPanel.setTitleClickTarget(openPath);
+            pieChartPanel.setOnTitleClick(() -> openInExplorer(openPath));
+            pieChartPanel.setItemsTop10(singleList);
+
+            // 최신 캐시는 파일 선택 시 의미 없으니 비우기(선택 사항)
+            //clearLatest();
         }
 
         private void startScan(Path folder) {
             cancelCurrentWorker();
 
-            setLatestFolder(folder);
+            final long myToken = ++scanToken;
+
+            latestFolder = folder;
+            latestItems.clear();
+
             statusLabel.setText("스캔 시작: " + folder);
 
             progressBar.setIndeterminate(true);
             progressBar.setString("스캔 중...");
             progressBar.setVisible(true);
 
-            // 탭1 초기화
-            detailPanel.setTitle("폴더: " + folder);
-            detailPanel.setItems(Collections.emptyList());
-            detailPanel.setTitleClickTarget(folder);
-            detailPanel.setOnTitleClick(() -> openInExplorer(folder));
-
-            // 탭2 초기화
-            pieChartPanel.setTitle("폴더: " + folder);
+            applySelectionToDetail("폴더: " + folder, folder);
+            applySelectionToPie("폴더: " + folder, folder);
             pieChartPanel.clear();
 
             currentWorker = new SizeScanWorker(folder, new SizeScanWorker.Callback() {
                 @Override
                 public void onPartial(SizeItem item) {
+                    if (myToken != scanToken) return;
                     detailPanel.upsertItem(item);
                     upsertLatest(item);
 
-                    // 차트 탭이 열려있을 때만 실시간 갱신
                     if (rightTabs.getSelectedIndex() == 1) {
                         pieChartPanel.setItemsTop10(latestItems);
                     }
@@ -301,6 +321,7 @@ public class FolderSizeVizApp {
 
                 @Override
                 public void onDone(List<SizeItem> finalItems, long totalBytes, long scannedFiles) {
+                    if (myToken != scanToken) return;
                     progressBar.setVisible(false);
                     statusLabel.setText("완료: " + folder + " / 총 " + human(totalBytes) + " / 파일 " + scannedFiles + "개");
 
@@ -309,18 +330,19 @@ public class FolderSizeVizApp {
                     latestItems.clear();
                     latestItems.addAll(finalItems);
 
-                    // 완료 시에는 탭 상태와 상관없이 최신 데이터 반영
                     refreshPieChartFromLatest();
                 }
 
                 @Override
                 public void onCancelled() {
+                    if (myToken != scanToken) return;
                     progressBar.setVisible(false);
                     statusLabel.setText("스캔 취소됨: " + folder);
                 }
 
                 @Override
                 public void onError(Exception ex) {
+                    if (myToken != scanToken) return;
                     progressBar.setVisible(false);
                     statusLabel.setText("오류: " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
                 }
@@ -329,21 +351,32 @@ public class FolderSizeVizApp {
             currentWorker.execute();
         }
 
-        // ---------------- 최신 결과/차트 갱신 ----------------
+        private void applySelectionToDetail(String title, Path openPath) {
+            detailPanel.setTitle(title);
+            detailPanel.setItems(Collections.emptyList());
+            detailPanel.setTitleClickTarget(openPath);
+            detailPanel.setOnTitleClick(() -> openInExplorer(openPath));
+        }
+
+        private void applySelectionToPie(String title, Path openPath) {
+            pieChartPanel.setTitle(title);
+            pieChartPanel.setTitleClickTarget(openPath);
+            pieChartPanel.setOnTitleClick(() -> openInExplorer(openPath));
+        }
 
         private void refreshPieChartFromLatest() {
-            pieChartPanel.setTitle(latestFolder == null ? "선택 없음" : "폴더: " + latestFolder);
+            if (latestFolder == null) {
+                pieChartPanel.setTitle("선택 없음");
+                pieChartPanel.setTitleClickTarget(null);
+                pieChartPanel.setOnTitleClick(null);
+                pieChartPanel.clear();
+                return;
+            }
+
+            pieChartPanel.setTitle("폴더: " + latestFolder);
+            pieChartPanel.setTitleClickTarget(latestFolder);
+            pieChartPanel.setOnTitleClick(() -> openInExplorer(latestFolder));
             pieChartPanel.setItemsTop10(latestItems);
-        }
-
-        private void clearLatest() {
-            latestFolder = null;
-            latestItems.clear();
-        }
-
-        private void setLatestFolder(Path folder) {
-            latestFolder = folder;
-            latestItems.clear();
         }
 
         private void upsertLatest(SizeItem item) {
@@ -357,28 +390,26 @@ public class FolderSizeVizApp {
             latestItems.add(item);
         }
 
-        // ---------------- 기타 ----------------
-
         private void openInExplorer(Path path) {
             if (path == null) return;
+
             try {
-                Desktop.getDesktop().open(path.toFile());
+                if (Desktop.isDesktopSupported()) {
+                    Desktop.getDesktop().open(path.toFile());
+                    return;
+                }
+            } catch (Exception ignored) {}
+
+            try {
+                new ProcessBuilder("explorer.exe", path.toAbsolutePath().toString()).start();
             } catch (Exception ex) {
                 statusLabel.setText("탐색기 열기 실패: " + path);
             }
         }
 
         private void cancelCurrentWorker() {
-            if (currentWorker != null && !currentWorker.isDone()) {
-                currentWorker.cancel(true);
-            }
+            if (currentWorker != null && !currentWorker.isDone()) currentWorker.cancel(true);
         }
-
-        private static final Comparator<Path> PATH_BY_NAME = Comparator.comparing(p -> {
-            Path fn = p.getFileName();
-            String s = (fn == null ? p.toString() : fn.toString());
-            return s.toLowerCase(Locale.ROOT);
-        });
 
         private static String fileNameOrPath(Path p) {
             Path fn = p.getFileName();
@@ -393,8 +424,6 @@ public class FolderSizeVizApp {
             }
         }
     }
-
-    // ---------------- 트리 노드 / 렌더러 ----------------
 
     static class FolderNode extends DefaultMutableTreeNode {
         final Path path;
@@ -470,11 +499,9 @@ public class FolderSizeVizApp {
                 if (isDir) {
                     key = (path.getParent() == null) ? "DRIVE:" + path.toString() : "DIR";
                 } else {
-                    String name = path.getFileName() == null ? path.toString() : path.getFileName().toString();
+                    String name = (path.getFileName() == null) ? path.toString() : path.getFileName().toString();
                     int dot = name.lastIndexOf('.');
-                    String ext = (dot >= 0 && dot < name.length() - 1)
-                            ? name.substring(dot + 1).toLowerCase(Locale.ROOT)
-                            : "";
+                    String ext = (dot >= 0 && dot < name.length() - 1) ? name.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
                     key = "FILE:" + ext;
                 }
 
@@ -490,8 +517,6 @@ public class FolderSizeVizApp {
             }
         }
     }
-
-    // ---------------- 데이터/테마 ----------------
 
     public static class SizeItem {
         public final String name;
@@ -539,8 +564,6 @@ public class FolderSizeVizApp {
         }
     }
 
-    // ---------------- 스캔 워커 ----------------
-
     static class SizeScanWorker extends SwingWorker<List<SizeItem>, SizeItem> {
 
         interface Callback {
@@ -572,14 +595,12 @@ public class FolderSizeVizApp {
                     try {
                         if (Files.isDirectory(p)) childrenDirs.add(p);
                         else childrenFiles.add(p);
-                    } catch (Exception ignored) {
-                    }
+                    } catch (Exception ignored) {}
                 }
-            } catch (IOException | SecurityException ignored) {
-            }
+            } catch (IOException | SecurityException ignored) {}
 
-            childrenFiles.sort(MainFrame.PATH_BY_NAME);
-            childrenDirs.sort(MainFrame.PATH_BY_NAME);
+            childrenFiles.sort(PATH_BY_NAME);
+            childrenDirs.sort(PATH_BY_NAME);
 
             List<SizeItem> result = new ArrayList<>();
 
@@ -592,12 +613,9 @@ public class FolderSizeVizApp {
                         sz = Files.size(f);
                         scannedFiles++;
                     }
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
 
-                String name = MainFrame.fileNameOrPath(f);
-                SizeItem item = new SizeItem(name, sz, false);
-
+                SizeItem item = new SizeItem(MainFrame.fileNameOrPath(f), sz, false);
                 result.add(item);
                 totalBytes += sz;
                 publish(item);
@@ -607,8 +625,7 @@ public class FolderSizeVizApp {
                 if (isCancelled()) return Collections.emptyList();
 
                 long dirBytes = folderSizeRecursive(d);
-                String name = MainFrame.fileNameOrPath(d);
-                SizeItem item = new SizeItem(name, dirBytes, true);
+                SizeItem item = new SizeItem(MainFrame.fileNameOrPath(d), dirBytes, true);
 
                 result.add(item);
                 totalBytes += dirBytes;
@@ -651,14 +668,12 @@ public class FolderSizeVizApp {
                     @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                         if (isCancelled()) return FileVisitResult.TERMINATE;
-
                         try {
                             if (attrs.isRegularFile()) {
                                 sum[0] += attrs.size();
                                 scannedFiles++;
                             }
-                        } catch (Exception ignored) {
-                        }
+                        } catch (Exception ignored) {}
                         return FileVisitResult.CONTINUE;
                     }
 
@@ -667,14 +682,11 @@ public class FolderSizeVizApp {
                         return isCancelled() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
                     }
                 });
-            } catch (IOException | SecurityException ignored) {
-            }
+            } catch (IOException | SecurityException ignored) {}
 
             return sum[0];
         }
     }
-
-    // ---------------- 유틸 ----------------
 
     public static String human(long bytes) {
         if (bytes < 1024) return bytes + " B";

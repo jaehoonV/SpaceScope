@@ -6,6 +6,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public class DetailChartPanel extends JPanel implements Scrollable {
@@ -24,8 +25,15 @@ public class DetailChartPanel extends JPanel implements Scrollable {
 
     private static final int CHART_LEFT_PADDING = 24;
 
-    private String title = "선택 없음";
-    private List<FolderSizeVizApp.SizeItem> items = new ArrayList<>();
+    private static final String DEFAULT_TITLE = "선택 없음";
+    private static final String EMPTY_HINT =
+            "폴더를 선택하면 하위 폴더/파일 용량을 함께 표시합니다. 파일을 선택하면 파일 크기만 표시합니다.";
+
+    private static final Comparator<FolderSizeVizApp.SizeItem> BY_SIZE_DESC =
+            (a, b) -> Long.compare(b.bytes, a.bytes);
+
+    private String title = DEFAULT_TITLE;
+    private final List<FolderSizeVizApp.SizeItem> items = new ArrayList<>();
 
     private Path titleClickTarget;
     private Runnable onTitleClick;
@@ -39,20 +47,70 @@ public class DetailChartPanel extends JPanel implements Scrollable {
         setForeground(UIManager.getColor("Label.foreground"));
         setBorder(BorderFactory.createEmptyBorder(PAD, PAD, PAD, PAD));
 
+        installTitleMouseHandlers();
+        updatePreferredSize();
+    }
+
+    public void setTitle(String title) {
+        this.title = (title == null || title.isBlank()) ? DEFAULT_TITLE : title;
+        updatePreferredSize();
+        repaint();
+    }
+
+    public void setTitleClickTarget(Path path) {
+        this.titleClickTarget = path;
+        repaint();
+    }
+
+    public void setOnTitleClick(Runnable r) {
+        this.onTitleClick = r;
+        repaint();
+    }
+
+    public void setItems(List<FolderSizeVizApp.SizeItem> newItems) {
+        items.clear();
+        if (newItems != null) items.addAll(newItems);
+        items.sort(BY_SIZE_DESC);
+        updatePreferredSize();
+        repaint();
+    }
+
+    public void upsertItem(FolderSizeVizApp.SizeItem item) {
+        if (item == null) return;
+
+        for (int i = 0; i < items.size(); i++) {
+            FolderSizeVizApp.SizeItem cur = items.get(i);
+            if (cur.isDirectory == item.isDirectory && cur.name.equals(item.name)) {
+                items.set(i, item);
+                items.sort(BY_SIZE_DESC);
+                updatePreferredSize();
+                repaint();
+                return;
+            }
+        }
+
+        items.add(item);
+        items.sort(BY_SIZE_DESC);
+        updatePreferredSize();
+        repaint();
+    }
+
+    private void installTitleMouseHandlers() {
         addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (!isTitleClickable()) return;
-                if (titleTextBounds.contains(e.getPoint())) {
-                    onTitleClick.run();
-                }
+                if (!SwingUtilities.isLeftMouseButton(e)) return;
+                if (titleTextBounds.contains(e.getPoint())) onTitleClick.run();
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
+                if (!titleHover) return;
                 titleHover = false;
                 setCursor(Cursor.getDefaultCursor());
                 setToolTipText(null);
+                repaint();
             }
         });
 
@@ -84,8 +142,6 @@ public class DetailChartPanel extends JPanel implements Scrollable {
                 }
             }
         });
-
-        updatePreferredSize();
     }
 
     private boolean isTitleClickable() {
@@ -93,55 +149,7 @@ public class DetailChartPanel extends JPanel implements Scrollable {
     }
 
     private String buildTitleTooltip() {
-        if (titleClickTarget == null) return null;
-        return titleClickTarget.toString() + " 폴더로 이동";
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-        updatePreferredSize();
-        repaint();
-    }
-
-    public void setTitleClickTarget(Path path) {
-        this.titleClickTarget = path;
-        repaint();
-    }
-
-    public void setOnTitleClick(Runnable r) {
-        this.onTitleClick = r;
-        repaint();
-    }
-
-    public void setItems(List<FolderSizeVizApp.SizeItem> newItems) {
-        items = sortedCopy(newItems);
-        updatePreferredSize();
-        repaint();
-    }
-
-    public void upsertItem(FolderSizeVizApp.SizeItem item) {
-        boolean replaced = false;
-
-        for (int i = 0; i < items.size(); i++) {
-            FolderSizeVizApp.SizeItem cur = items.get(i);
-            if (cur.isDirectory == item.isDirectory && cur.name.equals(item.name)) {
-                items.set(i, item);
-                replaced = true;
-                break;
-            }
-        }
-
-        if (!replaced) items.add(item);
-        items.sort((a, b) -> Long.compare(b.bytes, a.bytes));
-
-        updatePreferredSize();
-        repaint();
-    }
-
-    private static List<FolderSizeVizApp.SizeItem> sortedCopy(List<FolderSizeVizApp.SizeItem> src) {
-        List<FolderSizeVizApp.SizeItem> sorted = new ArrayList<>(src);
-        sorted.sort((a, b) -> Long.compare(b.bytes, a.bytes));
-        return sorted;
+        return (titleClickTarget == null) ? null : titleClickTarget + " 폴더로 이동";
     }
 
     private void updatePreferredSize() {
@@ -154,6 +162,7 @@ public class DetailChartPanel extends JPanel implements Scrollable {
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
+
         Graphics2D g2 = (Graphics2D) g.create();
         try {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -169,16 +178,13 @@ public class DetailChartPanel extends JPanel implements Scrollable {
             FontMetrics fm = g2.getFontMetrics();
             int baselineY = y + 18;
 
-            String titleText = title;
-
-            int textW = fm.stringWidth(titleText);
+            int textW = fm.stringWidth(title);
             int textH = fm.getHeight();
             int textTop = baselineY - fm.getAscent();
-
             titleTextBounds.setBounds(0, textTop, textW, textH);
 
             g2.setColor(c.fg);
-            g2.drawString(titleText, 0, baselineY);
+            g2.drawString(title, 0, baselineY);
 
             if (isTitleClickable() && titleHover) {
                 g2.setColor(c.muted);
@@ -192,28 +198,28 @@ public class DetailChartPanel extends JPanel implements Scrollable {
             g2.drawLine(0, y - AFTER_TITLE_LINE_OFFSET, w, y - AFTER_TITLE_LINE_OFFSET);
             y += AFTER_TITLE_GAP;
 
-            int chartTop = y;
-
             if (items.isEmpty()) {
                 g2.setColor(c.muted);
-                g2.drawString("폴더를 선택하면 하위 폴더/파일 용량을 함께 표시합니다. 파일을 선택하면 파일 크기만 표시합니다.", 0, chartTop + 30);
+                g2.drawString(EMPTY_HINT, 0, y + 30);
                 return;
             }
 
-            long max = items.stream().mapToLong(it -> it.bytes).max().orElse(1L);
+            long max = 1L;
+            for (FolderSizeVizApp.SizeItem it : items) max = Math.max(max, it.bytes);
+
             int barX = CHART_LEFT_PADDING;
             int barAreaWidth = w - CHART_LEFT_PADDING - 10;
             int tagX = CHART_LEFT_PADDING - 10;
 
-            int yy = chartTop;
-
+            int yy = y;
             for (FolderSizeVizApp.SizeItem it : items) {
                 double ratio = (max == 0) ? 0.0 : (double) it.bytes / (double) max;
                 int barW = (int) (barAreaWidth * ratio);
 
-                g2.setColor(c.fg);
                 String tag = it.isDirectory ? "[DIR] " : "[FILE] ";
                 String label = tag + trimMiddle(it.name, 42) + "  (" + FolderSizeVizApp.human(it.bytes) + ")";
+
+                g2.setColor(c.fg);
                 g2.drawString(label, tagX, yy + 12);
 
                 int barY = yy + LABEL_H + GAP1;
