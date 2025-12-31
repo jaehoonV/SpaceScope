@@ -2,6 +2,7 @@ package FolderSizeViz;
 
 import Utils.LanguageUtil;
 import Utils.LocaleManager;
+import Utils.SizeFormatUtil;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.intellijthemes.materialthemeuilite.FlatMTArcDarkIJTheme;
 
@@ -17,7 +18,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.text.DecimalFormat;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -45,7 +45,7 @@ public class FolderSizeVizApp {
 
     public static void main(String[] args) {
         LanguageUtil.init();
-        
+
         SwingUtilities.invokeLater(() -> {
             setupDarkTheme();
             new MainFrame().setVisible(true);
@@ -98,6 +98,16 @@ public class FolderSizeVizApp {
 
             setLayout(new BorderLayout());
             add(buildSplitPane(), BorderLayout.CENTER);
+
+            // 클릭 → 트리 선택 + 재스캔 공통 처리
+            detailPanel.setOnItemClick(this::selectAndScan);
+            pieChartPanel.setOnSliceClick(this::selectAndScan);
+        }
+
+        private void selectAndScan(Path path) {
+            if (path == null) return;
+            selectPathInTree(path);
+            scanAndUpdateUI(path);
         }
 
         private JMenuBar buildMenuBar() {
@@ -139,10 +149,10 @@ public class FolderSizeVizApp {
 
         private void showAbout() {
             String message = String.format("""
-            📁 %s
-            Version %s
-            © 2025 %s
-            """, LanguageUtil.ln("app.title"), APP_VERSION, APP_AUTHOR);
+                    📁 %s
+                    Version %s
+                    © 2025 %s
+                    """, LanguageUtil.ln("app.title"), APP_VERSION, APP_AUTHOR);
 
             JOptionPane.showMessageDialog(
                     this,
@@ -222,7 +232,8 @@ public class FolderSizeVizApp {
                 }
 
                 @Override
-                public void treeWillCollapse(TreeExpansionEvent event) {}
+                public void treeWillCollapse(TreeExpansionEvent event) {
+                }
             });
 
             tree.addTreeSelectionListener(e -> {
@@ -249,7 +260,8 @@ public class FolderSizeVizApp {
                     FolderNode drive = new FolderNode(p);
                     maybeAddLoadingPlaceholder(drive, p);
                     root.add(drive);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
             return root;
         }
@@ -273,7 +285,8 @@ public class FolderSizeVizApp {
                     try {
                         if (Files.isDirectory(p)) dirs.add(p);
                         else files.add(p);
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                    }
                 }
             } catch (IOException | SecurityException ignored) {
                 return;
@@ -305,27 +318,104 @@ public class FolderSizeVizApp {
             progressBar.setVisible(false);
 
             String name = fileNameOrPath(file);
-            statusLabel.setText( LanguageUtil.ln("status.file_selected") + " : " + file);
+            statusLabel.setText(LanguageUtil.ln("status.file_selected") + " : " + file);
 
             long size = 0L;
             try {
                 if (Files.isRegularFile(file)) size = Files.size(file);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
 
-            SizeItem single = new SizeItem(name, size, false);
+            SizeItem single = new SizeItem(name, size, false, file);
             List<SizeItem> singleList = List.of(single);
+
+            latestFolder = file;
+            latestItems.clear();
+            latestItems.addAll(singleList);
 
             detailPanel.setTitle(LanguageUtil.ln("label.file") + " : " + name);
             detailPanel.setItems(singleList);
 
             Path openPath = file.getParent();
+            if (openPath == null) openPath = file.getRoot(); // 루트 방어
+
             detailPanel.setTitleClickTarget(openPath);
-            detailPanel.setOnTitleClick(() -> openInExplorer(openPath));
+            Path finalOpenPath = openPath;
+            detailPanel.setOnTitleClick(() -> openInExplorer(finalOpenPath));
 
             pieChartPanel.setTitle(LanguageUtil.ln("label.file") + " : " + name);
             pieChartPanel.setTitleClickTarget(openPath);
-            pieChartPanel.setOnTitleClick(() -> openInExplorer(openPath));
+            pieChartPanel.setOnTitleClick(() -> openInExplorer(finalOpenPath));
             pieChartPanel.setItemsTop10(singleList);
+        }
+
+        private void selectPathInTree(Path target) {
+            if (target == null) return;
+
+            Path toSelect = target;
+            try {
+                if (!Files.isDirectory(target)) {
+                    Path parent = target.getParent();
+                    if (parent != null) toSelect = parent;
+                }
+            } catch (Exception ignored) {
+            }
+
+            FolderNode root = (FolderNode) treeModel.getRoot();
+
+            Path drive = toSelect.getRoot();
+            if (drive == null) return;
+
+            FolderNode driveNode = null;
+            for (int i = 0; i < root.getChildCount(); i++) {
+                Object ch = root.getChildAt(i);
+                if (ch instanceof FolderNode fn && !fn.isVirtual() && drive.equals(fn.path)) {
+                    driveNode = fn;
+                    break;
+                }
+            }
+            if (driveNode == null) return;
+
+            javax.swing.tree.TreePath tp = new javax.swing.tree.TreePath(driveNode.getPath());
+            tree.expandPath(tp);
+            ensureChildrenLoaded(driveNode);
+
+            Path curPath = drive;
+            FolderNode curNode = driveNode;
+
+            for (Path namePart : drive.relativize(toSelect)) {
+                curPath = curPath.resolve(namePart);
+
+                ensureChildrenLoaded(curNode);
+
+                FolderNode next = null;
+                for (int i = 0; i < curNode.getChildCount(); i++) {
+                    Object ch = curNode.getChildAt(i);
+                    if (ch instanceof FolderNode fn && !fn.isVirtual() && curPath.equals(fn.path)) {
+                        next = fn;
+                        break;
+                    }
+                }
+                if (next == null) break;
+
+                curNode = next;
+                tp = tp.pathByAddingChild(curNode);
+                tree.expandPath(tp);
+            }
+
+            tree.setSelectionPath(tp);
+            tree.scrollPathToVisible(tp);
+        }
+
+        private void scanAndUpdateUI(Path path) {
+            if (path == null) return;
+
+            try {
+                if (Files.isDirectory(path)) startScan(path);
+                else showFileInfo(path);
+            } catch (Exception ex) {
+                statusLabel.setText(LanguageUtil.ln("status.error") + " : " + path);
+            }
         }
 
         private void startScan(Path folder) {
@@ -350,6 +440,7 @@ public class FolderSizeVizApp {
                 @Override
                 public void onPartial(SizeItem item) {
                     if (myToken != scanToken) return;
+
                     detailPanel.upsertItem(item);
                     upsertLatest(item);
 
@@ -361,8 +452,13 @@ public class FolderSizeVizApp {
                 @Override
                 public void onDone(List<SizeItem> finalItems, long totalBytes, long scannedFiles) {
                     if (myToken != scanToken) return;
+
                     progressBar.setVisible(false);
-                    statusLabel.setText(LanguageUtil.ln("status.done") + " : " + folder + " / " + LanguageUtil.ln("info.total_size") + " : " + human(totalBytes) + " / " + LanguageUtil.ln("label.file") + " : " + scannedFiles);
+                    statusLabel.setText(
+                            LanguageUtil.ln("status.done") + " : " + folder
+                                    + " / " + LanguageUtil.ln("info.total_size") + " : " + SizeFormatUtil.human(totalBytes)
+                                    + " / " + LanguageUtil.ln("label.file") + " : " + scannedFiles
+                    );
 
                     detailPanel.setItems(finalItems);
 
@@ -375,6 +471,7 @@ public class FolderSizeVizApp {
                 @Override
                 public void onCancelled() {
                     if (myToken != scanToken) return;
+
                     progressBar.setVisible(false);
                     statusLabel.setText(LanguageUtil.ln("status.scan_cancelled") + " : " + folder);
                 }
@@ -382,8 +479,11 @@ public class FolderSizeVizApp {
                 @Override
                 public void onError(Exception ex) {
                     if (myToken != scanToken) return;
+
                     progressBar.setVisible(false);
-                    statusLabel.setText(LanguageUtil.ln("status.error") + " : " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
+                    statusLabel.setText(
+                            LanguageUtil.ln("status.error") + " : " + ex.getClass().getSimpleName() + " - " + ex.getMessage()
+                    );
                 }
             });
 
@@ -412,16 +512,36 @@ public class FolderSizeVizApp {
                 return;
             }
 
-            pieChartPanel.setTitle(LanguageUtil.ln("info.folder") + " : " + latestFolder);
-            pieChartPanel.setTitleClickTarget(latestFolder);
-            pieChartPanel.setOnTitleClick(() -> openInExplorer(latestFolder));
+            boolean isDir;
+            try {
+                isDir = Files.isDirectory(latestFolder);
+            } catch (Exception ignored) {
+                isDir = false;
+            }
+
+            if (isDir) {
+                pieChartPanel.setTitle(LanguageUtil.ln("info.folder") + " : " + latestFolder);
+                pieChartPanel.setTitleClickTarget(latestFolder);
+                pieChartPanel.setOnTitleClick(() -> openInExplorer(latestFolder));
+                pieChartPanel.setItemsTop10(latestItems);
+                return;
+            }
+
+            String name = fileNameOrPath(latestFolder);
+            Path openPath = latestFolder.getParent();
+            if (openPath == null) openPath = latestFolder.getRoot();
+
+            pieChartPanel.setTitle(LanguageUtil.ln("label.file") + " : " + name);
+            pieChartPanel.setTitleClickTarget(openPath);
+            Path finalOpenPath = openPath;
+            pieChartPanel.setOnTitleClick(() -> openInExplorer(finalOpenPath));
             pieChartPanel.setItemsTop10(latestItems);
         }
 
         private void upsertLatest(SizeItem item) {
             for (int i = 0; i < latestItems.size(); i++) {
                 SizeItem cur = latestItems.get(i);
-                if (cur.isDirectory == item.isDirectory && cur.name.equals(item.name)) {
+                if (cur.isDirectory == item.isDirectory && Objects.equals(cur.name, item.name)) {
                     latestItems.set(i, item);
                     return;
                 }
@@ -432,17 +552,33 @@ public class FolderSizeVizApp {
         private void openInExplorer(Path path) {
             if (path == null) return;
 
+            Path p = path.toAbsolutePath().normalize();
+
+            // Desktop API 우선
             try {
                 if (Desktop.isDesktopSupported()) {
-                    Desktop.getDesktop().open(path.toFile());
+                    Desktop.getDesktop().open(p.toFile());
                     return;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
 
+            // Explorer fallback: 파일이면 /select 사용
             try {
-                new ProcessBuilder("explorer.exe", path.toAbsolutePath().toString()).start();
+                boolean isDir = false;
+                try {
+                    isDir = Files.isDirectory(p);
+                } catch (Exception ignored) {
+                }
+
+                ProcessBuilder pb = isDir
+                        ? new ProcessBuilder("explorer.exe", p.toString())
+                        : new ProcessBuilder("explorer.exe", "/select," + p.toString());
+
+                pb.start();
+
             } catch (Exception ex) {
-                statusLabel.setText(LanguageUtil.ln("error.explorer_open_failed") + " : " + path);
+                statusLabel.setText(LanguageUtil.ln("error.explorer_open_failed") + " : " + p);
             }
         }
 
@@ -536,11 +672,13 @@ public class FolderSizeVizApp {
             try {
                 String key;
                 if (isDir) {
-                    key = (path.getParent() == null) ? "DRIVE:" + path.toString() : "DIR";
+                    key = (path.getParent() == null) ? "DRIVE:" + path : "DIR";
                 } else {
                     String name = (path.getFileName() == null) ? path.toString() : path.getFileName().toString();
                     int dot = name.lastIndexOf('.');
-                    String ext = (dot >= 0 && dot < name.length() - 1) ? name.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
+                    String ext = (dot >= 0 && dot < name.length() - 1)
+                            ? name.substring(dot + 1).toLowerCase(Locale.ROOT)
+                            : "";
                     key = "FILE:" + ext;
                 }
 
@@ -561,11 +699,13 @@ public class FolderSizeVizApp {
         public final String name;
         public final long bytes;
         public final boolean isDirectory;
+        public final Path path;
 
-        public SizeItem(String name, long bytes, boolean isDirectory) {
+        public SizeItem(String name, long bytes, boolean isDirectory, Path path) {
             this.name = name;
             this.bytes = bytes;
             this.isDirectory = isDirectory;
+            this.path = path;
         }
     }
 
@@ -586,6 +726,7 @@ public class FolderSizeVizApp {
 
         public static ThemeColors fromUI() {
             Color fg = UIManager.getColor("Label.foreground");
+
             Color muted = UIManager.getColor("Label.disabledForeground");
             if (muted == null && fg != null) muted = fg.darker();
 
@@ -607,8 +748,11 @@ public class FolderSizeVizApp {
 
         interface Callback {
             void onPartial(SizeItem item);
+
             void onDone(List<SizeItem> finalItems, long totalBytes, long scannedFiles);
+
             void onCancelled();
+
             void onError(Exception ex);
         }
 
@@ -634,9 +778,11 @@ public class FolderSizeVizApp {
                     try {
                         if (Files.isDirectory(p)) childrenDirs.add(p);
                         else childrenFiles.add(p);
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                    }
                 }
-            } catch (IOException | SecurityException ignored) {}
+            } catch (IOException | SecurityException ignored) {
+            }
 
             childrenFiles.sort(PATH_BY_NAME);
             childrenDirs.sort(PATH_BY_NAME);
@@ -652,9 +798,10 @@ public class FolderSizeVizApp {
                         sz = Files.size(f);
                         scannedFiles++;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
 
-                SizeItem item = new SizeItem(MainFrame.fileNameOrPath(f), sz, false);
+                SizeItem item = new SizeItem(MainFrame.fileNameOrPath(f), sz, false, f);
                 result.add(item);
                 totalBytes += sz;
                 publish(item);
@@ -664,7 +811,7 @@ public class FolderSizeVizApp {
                 if (isCancelled()) return Collections.emptyList();
 
                 long dirBytes = folderSizeRecursive(d);
-                SizeItem item = new SizeItem(MainFrame.fileNameOrPath(d), dirBytes, true);
+                SizeItem item = new SizeItem(MainFrame.fileNameOrPath(d), dirBytes, true, d);
 
                 result.add(item);
                 totalBytes += dirBytes;
@@ -712,7 +859,8 @@ public class FolderSizeVizApp {
                                 sum[0] += attrs.size();
                                 scannedFiles++;
                             }
-                        } catch (Exception ignored) {}
+                        } catch (Exception ignored) {
+                        }
                         return FileVisitResult.CONTINUE;
                     }
 
@@ -721,23 +869,10 @@ public class FolderSizeVizApp {
                         return isCancelled() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
                     }
                 });
-            } catch (IOException | SecurityException ignored) {}
+            } catch (IOException | SecurityException ignored) {
+            }
 
             return sum[0];
         }
-    }
-
-    public static String human(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        double b = bytes;
-        String[] u = {"KB", "MB", "GB", "TB"};
-        int i = -1;
-        while (b >= 1024 && i < u.length - 1) {
-            b /= 1024.0;
-            i++;
-        }
-        if (i < 0) return bytes + " B";
-        DecimalFormat df = new DecimalFormat("#,##0.0");
-        return df.format(b) + " " + u[i];
     }
 }
