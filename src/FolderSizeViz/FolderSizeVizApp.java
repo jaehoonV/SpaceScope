@@ -79,6 +79,8 @@ public class FolderSizeVizApp {
 
         private SizeScanWorker currentWorker;
 
+        private ExportCsvWorker exportWorker;
+
         private final List<SizeItem> latestItems = new ArrayList<>();
         private Path latestFolder;
 
@@ -114,7 +116,6 @@ public class FolderSizeVizApp {
             JMenuBar menuBar = new JMenuBar();
 
             JMenu settingsMenu = new JMenu(LanguageUtil.ln("menu.settings"));
-
             JMenu languageMenu = new JMenu(LanguageUtil.ln("menu.settings.language"));
             JMenuItem koreanItem = new JMenuItem(LanguageUtil.ln("menu.settings.language.korean"));
             JMenuItem englishItem = new JMenuItem(LanguageUtil.ln("menu.settings.language.english"));
@@ -133,7 +134,121 @@ public class FolderSizeVizApp {
             settingsMenu.add(aboutItem);
 
             menuBar.add(settingsMenu);
+
+            JMenu fileMenu = new JMenu(LanguageUtil.ln("menu.file"));
+            JMenuItem exportItem = new JMenuItem(LanguageUtil.ln("menu.file.export"));
+            exportItem.addActionListener(e -> onExportClicked());
+            fileMenu.add(exportItem);
+            menuBar.add(fileMenu);
+
             return menuBar;
+        }
+
+        private void onExportClicked() {
+            if (latestFolder == null) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        LanguageUtil.ln("status.no_selection"),
+                        LanguageUtil.ln("menu.file.export"),
+                        JOptionPane.WARNING_MESSAGE
+                );
+                return;
+            }
+
+            if (exportWorker != null && !exportWorker.isDone()) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        LanguageUtil.ln("status.export_running"),
+                        LanguageUtil.ln("menu.file.export"),
+                        JOptionPane.WARNING_MESSAGE
+                );
+                return;
+            }
+
+            JFileChooser fc = new JFileChooser();
+            fc.setDialogTitle(LanguageUtil.ln("export.dialog_title"));
+
+            String base = (latestFolder.getFileName() == null) ? "folder_size" : latestFolder.getFileName().toString();
+            fc.setSelectedFile(new File(base + "_folder_size_report.csv"));
+
+            int result = fc.showSaveDialog(this);
+            if (result != JFileChooser.APPROVE_OPTION) return;
+
+            File outFile = fc.getSelectedFile();
+
+            progressBar.setVisible(true);
+            progressBar.setIndeterminate(false);
+            progressBar.setMinimum(0);
+            progressBar.setMaximum(100);
+            progressBar.setValue(0);
+            progressBar.setStringPainted(true);
+            progressBar.setString(LanguageUtil.ln("status.export_preparing"));
+            statusLabel.setText(LanguageUtil.ln("status.export_start") + " : " + latestFolder);
+
+            boolean includeFiles = true;
+
+            exportWorker = new ExportCsvWorker(latestFolder, outFile, includeFiles);
+            exportWorker.addPropertyChangeListener(evt -> {
+                if ("progress".equals(evt.getPropertyName())) {
+                    int p = (int) evt.getNewValue();
+                    progressBar.setValue(p);
+                    progressBar.setString(LanguageUtil.ln("status.exporting") + " " + p + "%");
+                }
+            });
+            exportWorker.execute();
+
+        }
+
+        private void exportLatestToCsv(File outFile) throws IOException {
+            List<export.CsvExportRow> rows = buildRowsFromLatest();
+            export.CsvExportService.write(outFile, rows);
+        }
+
+        private List<export.CsvExportRow> buildRowsFromLatest() {
+            List<export.CsvExportRow> rows = new ArrayList<>();
+
+            if (latestFolder == null) return rows;
+
+            boolean rootIsDir = false;
+            try { rootIsDir = Files.isDirectory(latestFolder); } catch (Exception ignored) {}
+
+            long totalBytes = 0L;
+            for (SizeItem it : latestItems) totalBytes += Math.max(0L, it.bytes);
+
+            Date rootDate = safeDate(latestFolder);
+
+            // Root row
+            long rootSize = rootIsDir ? totalBytes : (!latestItems.isEmpty() ? latestItems.get(0).bytes : 0L);
+            rows.add(new export.CsvExportRow(
+                    rootIsDir ? "Folder" : "File",
+                    0,
+                    latestFolder.toAbsolutePath().normalize().toString(),
+                    rootSize,
+                    SizeFormatUtil.human(rootSize),
+                    rootDate
+            ));
+
+            // Children rows (Depth=1)
+            for (SizeItem it : latestItems) {
+                rows.add(new export.CsvExportRow(
+                        it.isDirectory ? "Folder" : "File",
+                        1,
+                        it.path.toAbsolutePath().normalize().toString(),
+                        it.bytes,
+                        SizeFormatUtil.human(it.bytes),
+                        safeDate(it.path)
+                ));
+            }
+
+            return rows;
+        }
+
+        private static Date safeDate(Path p) {
+            try {
+                return new Date(Files.getLastModifiedTime(p).toMillis());
+            } catch (Exception ignored) {
+                return new Date(0L);
+            }
         }
 
         private void switchLanguage(Locale newLocale) {
@@ -598,6 +713,74 @@ public class FolderSizeVizApp {
                 return false;
             }
         }
+
+        private final class ExportCsvWorker extends SwingWorker<Void, Void> {
+
+            private final Path root;
+            private final File outFile;
+            private final boolean includeFiles;
+
+            ExportCsvWorker(Path root, File outFile, boolean includeFiles) {
+                this.root = root;
+                this.outFile = outFile;
+                this.includeFiles = includeFiles;
+            }
+
+            @Override
+            protected Void doInBackground() throws Exception {
+                // 결정형 progress를 위해 2-pass
+                // 1) 총 엔트리 수 계산 (폴더/파일 row 개수)
+                int total = export.CsvRecursiveExportService.countEntries(root, includeFiles);
+                if (total <= 0) total = 1;
+
+                // 2) 실제 export (done 증가시마다 progress 갱신)
+                int finalTotal = total;
+                export.CsvRecursiveExportService.exportWithProgress(
+                        root,
+                        outFile,
+                        includeFiles,
+                        total,
+                        done -> {
+                            int pct = (int) Math.min(100, Math.round(done * 100.0 / finalTotal));
+                            setProgress(pct);
+                        }
+                );
+
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get(); // 예외 있으면 던짐
+
+                    progressBar.setValue(100);
+                    progressBar.setString(LanguageUtil.ln("status.export_done") + " 100%");
+                    progressBar.setVisible(false);
+
+                    statusLabel.setText(LanguageUtil.ln("status.export_done") + " : " + outFile.getAbsolutePath());
+
+                    JOptionPane.showMessageDialog(
+                            MainFrame.this,
+                            LanguageUtil.ln("status.csv_done") + "\n" + outFile.getAbsolutePath(),
+                            LanguageUtil.ln("menu.file.export"),
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+
+                } catch (Exception ex) {
+                    progressBar.setVisible(false);
+                    statusLabel.setText(LanguageUtil.ln("status.error") + " : " + ex.getMessage());
+
+                    JOptionPane.showMessageDialog(
+                            MainFrame.this,
+                            LanguageUtil.ln("status.error") + " : " + ex.getMessage(),
+                            LanguageUtil.ln("menu.file.export"),
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                }
+            }
+        }
+
     }
 
     static class FolderNode extends DefaultMutableTreeNode {
