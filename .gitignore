@@ -32,6 +32,10 @@ build/
 # Maven
 target/
 
+# Legacy / wrong MANIFEST
+src/META-INF/
+META-INF/MANIFEST.MF
+
 # OS
 .DS_Store
 Thumbs.db

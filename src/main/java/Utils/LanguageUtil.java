@@ -7,7 +7,7 @@ import java.util.ResourceBundle;
 
 public final class LanguageUtil {
 
-    private static final String BASE_NAME = "resources.messages";
+    private static final String BASE_NAME = "messages";
     private static volatile ResourceBundle bundle;
 
     private LanguageUtil() {}

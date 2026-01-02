@@ -1,5 +1,6 @@
 package FolderSizeViz;
 
+import export.CsvExportRow;
 import Utils.LanguageUtil;
 import Utils.LocaleManager;
 import Utils.SizeFormatUtil;
@@ -169,7 +170,7 @@ public class FolderSizeVizApp {
             fc.setDialogTitle(LanguageUtil.ln("export.dialog_title"));
 
             String base = (latestFolder.getFileName() == null) ? "folder_size" : latestFolder.getFileName().toString();
-            fc.setSelectedFile(new File(base + "_folder_size_report.csv"));
+            fc.setSelectedFile(new File(base + "_folder_size_report.xlsx"));
 
             int result = fc.showSaveDialog(this);
             if (result != JFileChooser.APPROVE_OPTION) return;
@@ -200,7 +201,7 @@ public class FolderSizeVizApp {
         }
 
         private void exportLatestToCsv(File outFile) throws IOException {
-            List<export.CsvExportRow> rows = buildRowsFromLatest();
+            List<CsvExportRow> rows = buildRowsFromLatest();
             export.CsvExportService.write(outFile, rows);
         }
 
@@ -728,21 +729,25 @@ public class FolderSizeVizApp {
 
             @Override
             protected Void doInBackground() throws Exception {
+                final int[] lastPct = { -1 };
                 // 결정형 progress를 위해 2-pass
                 // 1) 총 엔트리 수 계산 (폴더/파일 row 개수)
-                int total = export.CsvRecursiveExportService.countEntries(root, includeFiles);
+                int total = export.XlsxRecursiveExportService.countEntries(root, includeFiles);
                 if (total <= 0) total = 1;
 
                 // 2) 실제 export (done 증가시마다 progress 갱신)
                 int finalTotal = total;
-                export.CsvRecursiveExportService.exportWithProgress(
+                export.XlsxRecursiveExportService.exportWithProgress(
                         root,
                         outFile,
                         includeFiles,
                         total,
                         done -> {
                             int pct = (int) Math.min(100, Math.round(done * 100.0 / finalTotal));
-                            setProgress(pct);
+                            if (pct != lastPct[0]) {   // 퍼센트 바뀔 때만
+                                lastPct[0] = pct;
+                                setProgress(pct);
+                            }
                         }
                 );
 

@@ -39,7 +39,7 @@ public final class CsvRecursiveExportService {
             // Excel 한글 깨짐 방지 BOM
             w.write('\uFEFF');
 
-            w.println("Type,Depth,Path,Size (bytes),Formatted Size,Last Modified");
+            w.println("Type,Name,Depth,Path,Size (bytes),Formatted Size,Last Modified");
 
             writeTreePreOrder(rootDir, 0, includeFiles, dirSizeMap, w);
         }
@@ -55,8 +55,9 @@ public final class CsvRecursiveExportService {
                 new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8))
         )) {
             w.write('\uFEFF');
-            w.println("Type,Depth,Path,Size (bytes),Formatted Size,Last Modified");
-            w.printf("File,%d,\"%s\",%d,%s,%s%n",
+            w.println("Type,Name,Depth,Path,Size (bytes),Formatted Size,Last Modified");
+            w.printf("File,%s,%d,\"%s\",%d,%s,%s%n",
+                    escapeCsv(entryName(file)),
                     0,
                     escapeCsv(file.toAbsolutePath().normalize().toString()),
                     size,
@@ -134,7 +135,8 @@ public final class CsvRecursiveExportService {
     ) {
         long dirBytes = dirSizeMap.getOrDefault(dir, 0L);
 
-        w.printf("Folder,%d,\"%s\",%d,%s,%s%n",
+        w.printf("Folder,%s,%d,\"%s\",%d,%s,%s%n",
+                escapeCsv(entryName(dir)),
                 depth,
                 escapeCsv(dir.toAbsolutePath().normalize().toString()),
                 dirBytes,
@@ -175,7 +177,8 @@ public final class CsvRecursiveExportService {
                 long sz = 0L;
                 try { sz = Files.size(f); } catch (Exception ignored) {}
 
-                w.printf("File,%d,\"%s\",%d,%s,%s%n",
+                w.printf("File,%s,%d,\"%s\",%d,%s,%s%n",
+                        escapeCsv(entryName(f)),
                         depth + 1,
                         escapeCsv(f.toAbsolutePath().normalize().toString()),
                         sz,
@@ -257,7 +260,7 @@ public final class CsvRecursiveExportService {
                 new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8))
         )) {
             w.write('\uFEFF');
-            w.println("Type,Depth,Path,Size (bytes),Formatted Size,Last Modified");
+            w.println("Type,Name,Depth,Path,Size (bytes),Formatted Size,Last Modified");
 
             writeTreePreOrderWithProgress(rootDir, 0, includeFiles, dirSizeMap, w, done, totalEntries, onDoneEntries);
         }
@@ -275,7 +278,8 @@ public final class CsvRecursiveExportService {
     ) {
         long dirBytes = dirSizeMap.getOrDefault(dir, 0L);
 
-        w.printf("Folder,%d,\"%s\",%d,%s,%s%n",
+        w.printf("Folder,%s,%d,\"%s\",%d,%s,%s%n",
+                escapeCsv(entryName(dir)),
                 depth,
                 escapeCsv(dir.toAbsolutePath().normalize().toString()),
                 dirBytes,
@@ -314,7 +318,8 @@ public final class CsvRecursiveExportService {
                 long sz = 0L;
                 try { sz = Files.size(f); } catch (Exception ignored) {}
 
-                w.printf("File,%d,\"%s\",%d,%s,%s%n",
+                w.printf("File,%s,%d,\"%s\",%d,%s,%s%n",
+                        escapeCsv(entryName(f)),
                         depth + 1,
                         escapeCsv(f.toAbsolutePath().normalize().toString()),
                         sz,
@@ -330,6 +335,18 @@ public final class CsvRecursiveExportService {
         for (Path d : childDirs) {
             writeTreePreOrderWithProgress(d, depth + 1, includeFiles, dirSizeMap, w, done, totalEntries, onDoneEntries);
         }
+    }
+
+    private static String entryName(Path p) {
+        if (p == null) return "";
+        Path fn = p.getFileName();
+        String name = (fn == null ? "" : fn.toString());
+        if (name.isEmpty()) {
+            // 루트(C:\, /) 같은 경우
+            Path abs = p.toAbsolutePath().normalize();
+            return abs.toString();
+        }
+        return name;
     }
 
 }

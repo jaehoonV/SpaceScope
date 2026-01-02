@@ -38,7 +38,7 @@ public class FolderSizeExporterGUI {
 
     public static void main(String[] args) {
         locale = LocaleManager.loadLocale();
-        bundle = ResourceBundle.getBundle("resources.messages", locale, new UTF8Control());
+        bundle = ResourceBundle.getBundle("main.resources.messages", locale, new UTF8Control());
 
         try {
             FlatMTArcDarkIJTheme.setup();
@@ -186,7 +186,7 @@ public class FolderSizeExporterGUI {
         LocaleManager.saveLocale(newLocale);
         frame.dispose();
         locale = newLocale;
-        bundle = ResourceBundle.getBundle("resources.messages", locale, new UTF8Control());
+        bundle = ResourceBundle.getBundle("main.resources.messages", locale, new UTF8Control());
         SwingUtilities.invokeLater(FolderSizeExporterGUI::createAndShowGUI);
     }
 
